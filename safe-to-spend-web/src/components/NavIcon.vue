@@ -25,6 +25,15 @@ defineProps({
       />
       <circle cx="15.5" cy="13" r="1.4" fill="currentColor" />
     </template>
+    <template v-else-if="icon === 'receipt'">
+      <path
+        d="M6 3.5h12v17l-2-1.3-2 1.3-2-1.3-2 1.3-2-1.3-2 1.3v-17Z"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linejoin="round"
+      />
+      <path d="M8.5 8h7M8.5 11.5h7M8.5 15h4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+    </template>
     <template v-else-if="icon === 'settings'">
       <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7" />
       <path

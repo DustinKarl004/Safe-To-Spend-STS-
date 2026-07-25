@@ -11,7 +11,7 @@ const auth = useAuthStore()
 
 const navItems = [
   { name: 'dashboard', label: 'Overview', icon: 'gauge' },
-  { name: 'expense', label: 'Expense', icon: 'list' },
+  { name: 'transactions', label: 'Transactions', icon: 'receipt' },
   { name: 'balance', label: 'Balance', icon: 'wallet' },
 ]
 
@@ -22,7 +22,7 @@ function handleLogout() {
 </script>
 
 <template>
-  <div class="flex min-h-svh flex-col md:flex-row">
+  <div class="flex h-svh flex-col overflow-hidden md:flex-row">
     <!-- Sidebar: md and up -->
     <aside
       class="hidden md:flex md:w-60 md:shrink-0 md:flex-col md:justify-between md:border-r md:border-border md:bg-bg-raised md:px-5 md:py-6 lg:w-64"

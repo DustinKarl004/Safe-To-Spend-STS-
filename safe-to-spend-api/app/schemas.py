@@ -111,10 +111,17 @@ class IncomeCreate(BaseModel):
     entry_date: date | None = None
 
 
+class IncomeUpdate(BaseModel):
+    wallet_id: int | None = None
+    amount: float | None = Field(default=None, gt=0)
+    category: str | None = Field(default=None, pattern=INCOME_CATEGORY_PATTERN)
+    note: str | None = Field(default=None, max_length=140)
+
+
 class IncomeOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    wallet_id: int
+    wallet_id: int | None
     wallet_label: str
     amount: float
     category: str
@@ -151,6 +158,7 @@ class ExpenseCreate(BaseModel):
 
 
 class ExpenseUpdate(BaseModel):
+    wallet_id: int | None = None
     amount: float | None = Field(default=None, gt=0)
     category: str | None = Field(default=None, pattern=CATEGORY_PATTERN)
     note: str | None = Field(default=None, max_length=140)

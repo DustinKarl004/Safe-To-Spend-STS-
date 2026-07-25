@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import { useDashboardStore } from '@/stores/dashboard'
 import { useAuthStore } from '@/stores/auth'
 import { KIND_LABEL, providerIcon } from '@/lib/walletProviders'
@@ -11,6 +12,7 @@ import WalletEditSheet from '@/components/WalletEditSheet.vue'
 import IncomeLogSheet from '@/components/IncomeLogSheet.vue'
 import PaydayEditSheet from '@/components/PaydayEditSheet.vue'
 import MonthPicker from '@/components/MonthPicker.vue'
+import ConfirmModal from '@/components/ConfirmModal.vue'
 
 const dashboard = useDashboardStore()
 const auth = useAuthStore()
@@ -26,51 +28,65 @@ function money(n) {
   return Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-function formatDate(iso) {
-  return new Date(iso).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
-}
-
 function pad(n) {
   return String(n).padStart(2, '0')
 }
 
 const addWalletOpen = ref(false)
 const editingWallet = ref(null)
+const confirmingWalletRemove = ref(false)
+const removingWallet = ref(false)
 const addIncomeOpen = ref(false)
 const incomePrefill = ref({ category: 'salary', amount: null, walletId: null })
-const deletingIncomeId = ref(null)
 
-function toggleWallet({ kind, name }) {
-  const existing = dashboard.wallets.find((w) => w.label === name)
-  if (existing) {
-    dashboard.deleteWallet(existing.id)
-  } else {
-    dashboard.addWallet({ kind, label: name, balance: 0 })
+async function saveWalletSelection(selected) {
+  const selectedNames = new Set(selected.map((s) => s.name))
+  const toAdd = selected.filter((s) => !dashboard.wallets.some((w) => w.label === s.name))
+  const toRemove = dashboard.wallets.filter((w) => !selectedNames.has(w.label))
+
+  try {
+    for (const s of toAdd) {
+      await dashboard.addWallet({ kind: s.kind, label: s.name, balance: 0 })
+    }
+    for (const w of toRemove) {
+      await dashboard.deleteWallet(w.id)
+    }
+  } catch {
+    window.alert('Something went wrong saving your wallets. Please try again.')
   }
-}
-
-function clearWalletGroup(kind) {
-  const ids = dashboard.wallets.filter((w) => w.kind === kind).map((w) => w.id)
-  ids.forEach((id) => dashboard.deleteWallet(id))
 }
 
 function openWalletEdit(wallet) {
   editingWallet.value = wallet
 }
 
-async function saveWalletEdit(id, balance) {
-  await dashboard.updateWallet(id, { balance })
+function saveWalletEdit(id, balance) {
   editingWallet.value = null
+  dashboard.updateWallet(id, { balance }).catch(() => {
+    window.alert('Something went wrong saving that wallet. Please try again.')
+  })
 }
 
-async function removeWalletEdit(id) {
-  await dashboard.deleteWallet(id)
-  editingWallet.value = null
+function askRemoveWallet() {
+  confirmingWalletRemove.value = true
 }
 
-function openAddIncome() {
-  incomePrefill.value = { category: 'salary', amount: null, walletId: null }
-  addIncomeOpen.value = true
+function cancelRemoveWallet() {
+  confirmingWalletRemove.value = false
+}
+
+async function confirmRemoveWallet() {
+  if (!editingWallet.value) return
+  removingWallet.value = true
+  try {
+    await dashboard.deleteWallet(editingWallet.value.id)
+    confirmingWalletRemove.value = false
+    editingWallet.value = null
+  } catch {
+    window.alert('Something went wrong removing that wallet. Please try again.')
+  } finally {
+    removingWallet.value = false
+  }
 }
 
 function openIncomeForPayday() {
@@ -82,18 +98,11 @@ function openIncomeForPayday() {
   addIncomeOpen.value = true
 }
 
-async function handleLogIncome(payload) {
-  await dashboard.logIncome(payload)
+function handleLogIncome(payload) {
   addIncomeOpen.value = false
-}
-
-async function handleDeleteIncome(id) {
-  deletingIncomeId.value = id
-  try {
-    await dashboard.deleteIncome(id)
-  } finally {
-    deletingIncomeId.value = null
-  }
+  dashboard.logIncome(payload).catch(() => {
+    window.alert('Something went wrong logging that income. Please try again.')
+  })
 }
 
 // ---- net this month, with month/year navigation ----
@@ -239,50 +248,12 @@ async function removeExpectedPayday() {
       <p v-else class="mt-3 text-sm text-text-dim">No payday set yet.</p>
     </div>
 
-    <!-- Income -->
-    <div class="rounded-2xl border border-border bg-bg-raised p-6 shadow-sm">
-      <div class="flex items-center justify-between">
-        <h2 class="font-display text-base font-bold">Income</h2>
-        <button
-          type="button"
-          class="flex h-8 w-8 items-center justify-center rounded-full bg-bg-sunken text-text-dim transition hover:text-text"
-          aria-label="Add income"
-          title="Add income"
-          @click="openAddIncome"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-            <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-          </svg>
-        </button>
-      </div>
-
-      <p v-if="!dashboard.incomes.length" class="mt-4 text-sm text-text-dim">
-        Nothing logged yet — add your salary, bonus, or any other income here.
-      </p>
-      <ul v-else class="mt-4 flex flex-col divide-y divide-border">
-        <li v-for="income in dashboard.incomes" :key="income.id" class="flex items-center gap-3 py-3">
-          <CategoryIcon :icon="incomeCategory(income.category).icon" :color="incomeCategory(income.category).color" :size="36" />
-          <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-semibold">{{ income.note || incomeCategory(income.category).label }}</p>
-            <p class="text-xs text-text-dim">
-              {{ incomeCategory(income.category).label }} · {{ income.wallet_label }} · {{ formatDate(income.created_at) }}
-            </p>
-          </div>
-          <span class="shrink-0 text-sm font-bold tabular-nums text-safe">+₱{{ money(income.amount) }}</span>
-          <button
-            type="button"
-            class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-text-dim transition hover:bg-danger/10 hover:text-danger disabled:opacity-40"
-            aria-label="Delete income"
-            :disabled="deletingIncomeId === income.id"
-            @click="handleDeleteIncome(income.id)"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-              <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-            </svg>
-          </button>
-        </li>
-      </ul>
-    </div>
+    <RouterLink
+      :to="{ name: 'transactions' }"
+      class="flex items-center justify-center rounded-xl border border-dashed border-border py-3 text-sm font-semibold text-accent"
+    >
+      View income &amp; expense history →
+    </RouterLink>
 
     <!-- Wallets -->
     <div class="rounded-2xl border border-border bg-bg-raised p-6 shadow-sm">
@@ -324,8 +295,7 @@ async function removeExpectedPayday() {
       :open="addWalletOpen"
       :selected-names="dashboard.wallets.map((w) => w.label)"
       @close="addWalletOpen = false"
-      @toggle="toggleWallet"
-      @clear-group="clearWalletGroup"
+      @save="saveWalletSelection"
     />
 
     <WalletEditSheet
@@ -333,7 +303,16 @@ async function removeExpectedPayday() {
       :wallet="editingWallet"
       @close="editingWallet = null"
       @save="saveWalletEdit"
-      @remove="removeWalletEdit"
+      @remove="askRemoveWallet"
+    />
+
+    <ConfirmModal
+      :open="confirmingWalletRemove"
+      title="Remove this wallet?"
+      :message="`This will remove ${editingWallet?.label ?? 'this wallet'} from your list. Its expense and income history will be kept, just unlinked.`"
+      :busy="removingWallet"
+      @cancel="cancelRemoveWallet"
+      @confirm="confirmRemoveWallet"
     />
 
     <IncomeLogSheet

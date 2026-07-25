@@ -53,7 +53,7 @@ class WalletAdjustment(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    wallet_id: Mapped[int] = mapped_column(ForeignKey("wallets.id"))
+    wallet_id: Mapped[int | None] = mapped_column(ForeignKey("wallets.id"), nullable=True)
     wallet_label: Mapped[str] = mapped_column(String(50))
     delta: Mapped[float] = mapped_column(Numeric(12, 2))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
@@ -66,7 +66,7 @@ class Income(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    wallet_id: Mapped[int] = mapped_column(ForeignKey("wallets.id"))
+    wallet_id: Mapped[int | None] = mapped_column(ForeignKey("wallets.id"), nullable=True)
     wallet_label: Mapped[str] = mapped_column(String(50))
     amount: Mapped[float] = mapped_column(Numeric(12, 2))
     category: Mapped[str] = mapped_column(String(20))  # see INCOME_CATEGORY_PATTERN in schemas.py

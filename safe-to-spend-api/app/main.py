@@ -1,6 +1,7 @@
 import base64
 import io
 from datetime import date, datetime, timezone
+from decimal import Decimal
 
 import pyotp
 import qrcode
@@ -8,7 +9,7 @@ import qrcode.image.svg
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import inspect, select, text
+from sqlalchemy import inspect, select, text, update
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -30,6 +31,7 @@ from app.schemas import (
     ExpenseUpdate,
     IncomeCreate,
     IncomeOut,
+    IncomeUpdate,
     LoginOut,
     MfaLoginRequest,
     ObligationCreate,
@@ -79,7 +81,18 @@ def _ensure_columns():
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}"))
 
 
+def _ensure_nullable_wallet_refs():
+    """wallet_id on incomes/wallet_adjustments used to be NOT NULL; relax it so
+    deleting a wallet with history doesn't violate the FK constraint."""
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE incomes ALTER COLUMN wallet_id DROP NOT NULL"))
+        conn.execute(text("ALTER TABLE wallet_adjustments ALTER COLUMN wallet_id DROP NOT NULL"))
+
+
 _ensure_columns()
+_ensure_nullable_wallet_refs()
 
 app = FastAPI(title="Safe-to-Spend API")
 
@@ -241,8 +254,8 @@ def create_wallet(payload: WalletCreate, current_user: User = Depends(get_curren
     return wallet
 
 
-def _get_owned_wallet(wallet_id: int, current_user: User, db: Session) -> Wallet:
-    wallet = db.get(Wallet, wallet_id)
+def _get_owned_wallet(wallet_id: int, current_user: User, db: Session, for_update: bool = False) -> Wallet:
+    wallet = db.get(Wallet, wallet_id, with_for_update=for_update)
     if not wallet or wallet.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Wallet not found")
     return wallet
@@ -255,11 +268,11 @@ def update_wallet(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    wallet = _get_owned_wallet(wallet_id, current_user, db)
+    wallet = _get_owned_wallet(wallet_id, current_user, db, for_update=True)
     updates = payload.model_dump(exclude_unset=True)
 
     if "balance" in updates:
-        delta = updates["balance"] - float(wallet.balance)
+        delta = Decimal(str(updates["balance"])) - Decimal(str(wallet.balance))
         if delta != 0:
             db.add(
                 WalletAdjustment(
@@ -280,6 +293,13 @@ def update_wallet(
 @app.delete("/api/wallets/{wallet_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_wallet(wallet_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     wallet = _get_owned_wallet(wallet_id, current_user, db)
+
+    db.execute(update(Expense).where(Expense.wallet_id == wallet.id).values(wallet_id=None))
+    db.execute(update(Income).where(Income.wallet_id == wallet.id).values(wallet_id=None))
+    db.execute(update(WalletAdjustment).where(WalletAdjustment.wallet_id == wallet.id).values(wallet_id=None))
+    if current_user.payday_wallet_id == wallet.id:
+        current_user.payday_wallet_id = None
+
     db.delete(wallet)
     db.commit()
 
@@ -305,7 +325,7 @@ def list_income(current_user: User = Depends(get_current_user), db: Session = De
 
 @app.post("/api/income", response_model=IncomeOut, status_code=status.HTTP_201_CREATED)
 def create_income(payload: IncomeCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    wallet = _get_owned_wallet(payload.wallet_id, current_user, db)
+    wallet = _get_owned_wallet(payload.wallet_id, current_user, db, for_update=True)
 
     now = datetime.now(timezone.utc)
     created_at = datetime.combine(payload.entry_date, now.time(), tzinfo=timezone.utc) if payload.entry_date else now
@@ -319,9 +339,48 @@ def create_income(payload: IncomeCreate, current_user: User = Depends(get_curren
         note=payload.note,
         created_at=created_at,
     )
-    wallet.balance = float(wallet.balance) + payload.amount
+    wallet.balance = Decimal(str(wallet.balance)) + Decimal(str(payload.amount))
 
     db.add(income)
+    db.commit()
+    db.refresh(income)
+    return income
+
+
+@app.patch("/api/income/{income_id}", response_model=IncomeOut)
+def update_income(
+    income_id: int,
+    payload: IncomeUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    income = db.get(Income, income_id)
+    if not income or income.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Income entry not found")
+    updates = payload.model_dump(exclude_unset=True)
+
+    old_amount = Decimal(str(income.amount))
+    new_amount = Decimal(str(updates["amount"])) if "amount" in updates else old_amount
+    old_wallet_id = income.wallet_id
+    new_wallet_id = updates.get("wallet_id", old_wallet_id)
+
+    if new_wallet_id != old_wallet_id:
+        if old_wallet_id:
+            old_wallet = db.get(Wallet, old_wallet_id, with_for_update=True)
+            if old_wallet:
+                old_wallet.balance = Decimal(str(old_wallet.balance)) - old_amount
+        if new_wallet_id:
+            new_wallet = _get_owned_wallet(new_wallet_id, current_user, db, for_update=True)
+            new_wallet.balance = Decimal(str(new_wallet.balance)) + new_amount
+            updates["wallet_label"] = new_wallet.label
+    elif "amount" in updates and income.wallet_id:
+        wallet = db.get(Wallet, income.wallet_id, with_for_update=True)
+        if wallet:
+            delta = new_amount - old_amount
+            wallet.balance = Decimal(str(wallet.balance)) + delta
+
+    for field, value in updates.items():
+        setattr(income, field, value)
     db.commit()
     db.refresh(income)
     return income
@@ -333,9 +392,9 @@ def delete_income(income_id: int, current_user: User = Depends(get_current_user)
     if not income or income.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Income entry not found")
 
-    wallet = db.get(Wallet, income.wallet_id)
+    wallet = db.get(Wallet, income.wallet_id, with_for_update=True) if income.wallet_id else None
     if wallet:
-        wallet.balance = float(wallet.balance) - float(income.amount)
+        wallet.balance = Decimal(str(wallet.balance)) - Decimal(str(income.amount))
 
     db.delete(income)
     db.commit()
@@ -389,7 +448,7 @@ def _get_owned_expense(expense_id: int, current_user: User, db: Session) -> Expe
 
 @app.post("/api/expenses", response_model=ExpenseOut, status_code=status.HTTP_201_CREATED)
 def create_expense(payload: ExpenseCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    wallet = _get_owned_wallet(payload.wallet_id, current_user, db)
+    wallet = _get_owned_wallet(payload.wallet_id, current_user, db, for_update=True)
 
     now = datetime.now(timezone.utc)
     created_at = datetime.combine(payload.entry_date, now.time(), tzinfo=timezone.utc) if payload.entry_date else now
@@ -403,7 +462,7 @@ def create_expense(payload: ExpenseCreate, current_user: User = Depends(get_curr
         note=payload.note,
         created_at=created_at,
     )
-    wallet.balance = float(wallet.balance) - payload.amount
+    wallet.balance = Decimal(str(wallet.balance)) - Decimal(str(payload.amount))
 
     db.add(expense)
     db.commit()
@@ -421,11 +480,25 @@ def update_expense(
     expense = _get_owned_expense(expense_id, current_user, db)
     updates = payload.model_dump(exclude_unset=True)
 
-    if "amount" in updates and expense.wallet_id:
-        wallet = db.get(Wallet, expense.wallet_id)
+    old_amount = Decimal(str(expense.amount))
+    new_amount = Decimal(str(updates["amount"])) if "amount" in updates else old_amount
+    old_wallet_id = expense.wallet_id
+    new_wallet_id = updates.get("wallet_id", old_wallet_id)
+
+    if new_wallet_id != old_wallet_id:
+        if old_wallet_id:
+            old_wallet = db.get(Wallet, old_wallet_id, with_for_update=True)
+            if old_wallet:
+                old_wallet.balance = Decimal(str(old_wallet.balance)) + old_amount
+        if new_wallet_id:
+            new_wallet = _get_owned_wallet(new_wallet_id, current_user, db, for_update=True)
+            new_wallet.balance = Decimal(str(new_wallet.balance)) - new_amount
+            updates["wallet_label"] = new_wallet.label
+    elif "amount" in updates and expense.wallet_id:
+        wallet = db.get(Wallet, expense.wallet_id, with_for_update=True)
         if wallet:
-            delta = updates["amount"] - float(expense.amount)
-            wallet.balance = float(wallet.balance) - delta
+            delta = new_amount - old_amount
+            wallet.balance = Decimal(str(wallet.balance)) - delta
 
     for field, value in updates.items():
         setattr(expense, field, value)
@@ -439,9 +512,9 @@ def delete_expense(expense_id: int, current_user: User = Depends(get_current_use
     expense = _get_owned_expense(expense_id, current_user, db)
 
     if expense.wallet_id:
-        wallet = db.get(Wallet, expense.wallet_id)
+        wallet = db.get(Wallet, expense.wallet_id, with_for_update=True)
         if wallet:
-            wallet.balance = float(wallet.balance) + float(expense.amount)
+            wallet.balance = Decimal(str(wallet.balance)) + Decimal(str(expense.amount))
 
     db.delete(expense)
     db.commit()
@@ -461,7 +534,7 @@ def dashboard(current_user: User = Depends(get_current_user), db: Session = Depe
     total_balance = sum(float(w.balance) for w in wallets)
     total_reserved = sum(float(o.amount) for o in obligations)
 
-    today = datetime.now(timezone.utc).date()
+    today = datetime.now(settings.tzinfo).date()
     if current_user.next_payday and current_user.next_payday > today:
         days_remaining = (current_user.next_payday - today).days
     else:
@@ -469,8 +542,13 @@ def dashboard(current_user: User = Depends(get_current_user), db: Session = Depe
 
     base_daily_allowance = max((total_balance - total_reserved), 0) / days_remaining
 
+    def _local_date(dt: datetime) -> date:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(settings.tzinfo).date()
+
     spent_today = sum(
-        float(e.amount) for e in recent_expenses if e.created_at.date() == today
+        float(e.amount) for e in recent_expenses if _local_date(e.created_at) == today
     )
     safe_to_spend_today = base_daily_allowance - spent_today
 

@@ -11,6 +11,7 @@ const props = defineProps({
   wallets: { type: Array, default: () => [] },
   defaultCategory: { type: String, default: 'food' },
   defaultWalletId: { type: Number, default: null },
+  expense: { type: Object, default: null },
 })
 const emit = defineEmits(['close', 'submit'])
 
@@ -19,6 +20,8 @@ function pad(n) {
 }
 const today = new Date()
 const todayIso = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`
+
+const isEditing = computed(() => Boolean(props.expense))
 
 const category = ref(props.defaultCategory)
 const walletId = ref(null)
@@ -32,11 +35,18 @@ watch(
   () => props.open,
   (isOpen) => {
     if (isOpen) {
-      category.value = props.defaultCategory
-      walletId.value = props.defaultWalletId ?? props.wallets[0]?.id ?? null
-      amountStr.value = ''
+      if (props.expense) {
+        category.value = props.expense.category
+        walletId.value = props.expense.wallet_id ?? props.wallets[0]?.id ?? null
+        amountStr.value = String(props.expense.amount)
+        note.value = props.expense.note || ''
+      } else {
+        category.value = props.defaultCategory
+        walletId.value = props.defaultWalletId ?? props.wallets[0]?.id ?? null
+        amountStr.value = ''
+        note.value = ''
+      }
       entryDate.value = todayIso
-      note.value = ''
       error.value = ''
     }
   },
@@ -49,15 +59,16 @@ async function handleSubmit() {
   error.value = ''
   submitting.value = true
   try {
-    await emit('submit', {
+    const payload = {
       wallet_id: walletId.value,
       amount: Number(amountStr.value),
       category: category.value,
       note: note.value.trim() || null,
-      entry_date: entryDate.value,
-    })
+    }
+    if (!isEditing.value) payload.entry_date = entryDate.value
+    await emit('submit', payload)
   } catch (err) {
-    error.value = err.response?.data?.detail || 'Could not log that expense. Try again.'
+    error.value = err.response?.data?.detail || 'Could not save that expense. Try again.'
   } finally {
     submitting.value = false
   }
@@ -74,10 +85,10 @@ async function handleSubmit() {
       v-if="open"
       class="fixed inset-y-0 right-0 z-40 flex w-full max-w-sm flex-col bg-bg-raised shadow-2xl sm:max-w-md"
       role="dialog"
-      aria-label="Log an expense"
+      :aria-label="isEditing ? 'Edit expense' : 'Log an expense'"
     >
       <div class="flex items-center justify-between border-b border-border px-5 py-4">
-        <h2 class="font-display text-base font-bold">Log an expense</h2>
+        <h2 class="font-display text-base font-bold">{{ isEditing ? 'Edit expense' : 'Log an expense' }}</h2>
         <button
           type="button"
           class="flex h-8 w-8 items-center justify-center rounded-full text-text-dim hover:bg-bg-sunken hover:text-text"
@@ -140,7 +151,7 @@ async function handleSubmit() {
           </span>
         </label>
 
-        <label class="mt-4 flex flex-col gap-1.5 text-sm font-semibold">
+        <label v-if="!isEditing" class="mt-4 flex flex-col gap-1.5 text-sm font-semibold">
           Date
           <DatePicker v-model="entryDate" :max="todayIso" placeholder="Select a date" />
         </label>
@@ -166,7 +177,7 @@ async function handleSubmit() {
           class="w-full rounded-xl bg-accent py-3 text-sm font-bold text-accent-text disabled:opacity-40"
           @click="handleSubmit"
         >
-          {{ submitting ? 'Logging…' : 'Log expense' }}
+          {{ submitting ? (isEditing ? 'Saving…' : 'Logging…') : (isEditing ? 'Save changes' : 'Log expense') }}
         </button>
       </div>
     </aside>

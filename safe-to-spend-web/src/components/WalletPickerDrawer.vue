@@ -1,4 +1,5 @@
 <script setup>
+import { reactive, watch } from 'vue'
 import { WALLET_GROUPS } from '@/lib/walletProviders'
 import ProviderIcon from './ProviderIcon.vue'
 
@@ -6,20 +7,52 @@ const props = defineProps({
   open: { type: Boolean, default: false },
   selectedNames: { type: Array, default: () => [] },
 })
-const emit = defineEmits(['close', 'toggle', 'clear-group'])
+const emit = defineEmits(['close', 'save'])
+
+const pending = reactive(new Set())
+
+watch(
+  () => props.open,
+  (isOpen) => {
+    if (isOpen) {
+      pending.clear()
+      props.selectedNames.forEach((name) => pending.add(name))
+    }
+  },
+)
 
 function isSelected(name) {
-  return props.selectedNames.includes(name)
+  return pending.has(name)
 }
 
 function hasSelection(group) {
   return group.providers.some((p) => isSelected(p.name))
 }
+
+function toggle(name) {
+  if (pending.has(name)) {
+    pending.delete(name)
+  } else {
+    pending.add(name)
+  }
+}
+
+function clearGroup(group) {
+  group.providers.forEach((p) => pending.delete(p.name))
+}
+
+function finish() {
+  const selected = WALLET_GROUPS.flatMap((group) =>
+    group.providers.filter((p) => pending.has(p.name)).map((p) => ({ kind: group.kind, name: p.name })),
+  )
+  emit('save', selected)
+  emit('close')
+}
 </script>
 
 <template>
   <Transition name="fade">
-    <div v-if="open" class="fixed inset-0 z-30 bg-black/40" @click="emit('close')" />
+    <div v-if="open" class="fixed inset-0 z-30 bg-black/40" @click="finish" />
   </Transition>
 
   <Transition name="slide">
@@ -35,7 +68,7 @@ function hasSelection(group) {
           type="button"
           class="flex h-8 w-8 items-center justify-center rounded-full text-text-dim hover:bg-bg-sunken hover:text-text"
           aria-label="Close"
-          @click="emit('close')"
+          @click="finish"
         >
           ✕
         </button>
@@ -51,7 +84,7 @@ function hasSelection(group) {
               class="flex h-6 w-6 items-center justify-center rounded-full text-text-dim transition hover:bg-danger/10 hover:text-danger"
               :aria-label="`Clear ${group.label}`"
               :title="`Clear ${group.label}`"
-              @click="emit('clear-group', group.kind)"
+              @click="clearGroup(group)"
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
                 <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
@@ -69,7 +102,7 @@ function hasSelection(group) {
                   ? 'border-accent bg-accent/10 text-text'
                   : 'border-border bg-bg-sunken text-text hover:border-accent/50'
               "
-              @click="emit('toggle', { kind: group.kind, name: provider.name })"
+              @click="toggle(provider.name)"
             >
               <span v-if="isSelected(provider.name)" class="absolute right-2 top-2 text-accent">✓</span>
               <ProviderIcon v-bind="provider" :size="64" />
@@ -83,7 +116,7 @@ function hasSelection(group) {
         <button
           type="button"
           class="w-full rounded-xl bg-accent py-3 text-sm font-bold text-accent-text"
-          @click="emit('close')"
+          @click="finish"
         >
           Done
         </button>

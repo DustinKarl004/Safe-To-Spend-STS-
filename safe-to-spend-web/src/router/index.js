@@ -24,7 +24,7 @@ const routes = [
   {
     path: '/log',
     name: 'log',
-    redirect: { name: 'expense' },
+    redirect: { name: 'transactions' },
   },
   {
     path: '/balance',
@@ -32,13 +32,14 @@ const routes = [
     component: () => import('@/views/BalanceView.vue'),
     meta: { requiresAuth: true },
   },
+  { path: '/expense', redirect: { name: 'transactions' } },
   {
-    path: '/expense',
-    name: 'expense',
-    component: () => import('@/views/ExpenseView.vue'),
+    path: '/transactions',
+    name: 'transactions',
+    component: () => import('@/views/TransactionsView.vue'),
     meta: { requiresAuth: true },
   },
-  { path: '/history', redirect: { name: 'expense' } },
+  { path: '/history', redirect: { name: 'transactions' } },
   {
     path: '/settings',
     name: 'settings',

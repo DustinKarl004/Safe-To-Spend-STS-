@@ -149,7 +149,7 @@ const emptyMessage = computed(() => {
         <div class="rounded-2xl border border-border bg-bg-raised p-6 shadow-sm">
           <div class="flex items-center justify-between">
             <h2 class="font-display text-base font-bold">Transactions</h2>
-            <RouterLink :to="{ name: 'expense' }" class="text-sm font-semibold text-accent">See all</RouterLink>
+            <RouterLink :to="{ name: 'transactions' }" class="text-sm font-semibold text-accent">See all</RouterLink>
           </div>
 
           <div class="mt-3 flex items-center gap-2">
