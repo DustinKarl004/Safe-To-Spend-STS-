@@ -49,6 +49,11 @@ function toggleWallet({ kind, name }) {
   }
 }
 
+function clearWalletGroup(kind) {
+  const ids = dashboard.wallets.filter((w) => w.kind === kind).map((w) => w.id)
+  ids.forEach((id) => dashboard.deleteWallet(id))
+}
+
 function openWalletEdit(wallet) {
   editingWallet.value = wallet
 }
@@ -320,6 +325,7 @@ async function removeExpectedPayday() {
       :selected-names="dashboard.wallets.map((w) => w.label)"
       @close="addWalletOpen = false"
       @toggle="toggleWallet"
+      @clear-group="clearWalletGroup"
     />
 
     <WalletEditSheet
