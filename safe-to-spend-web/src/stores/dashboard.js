@@ -38,8 +38,15 @@ export const useDashboardStore = defineStore('dashboard', {
     },
 
     async addWallet(wallet) {
-      await api.post('/api/wallets', wallet)
-      await this.refresh()
+      const tempId = `temp-${Math.random().toString(36).slice(2)}`
+      this.wallets.push({ id: tempId, ...wallet })
+      try {
+        const { data } = await api.post('/api/wallets', wallet)
+        const idx = this.wallets.findIndex((w) => w.id === tempId)
+        if (idx !== -1) this.wallets[idx] = data
+      } finally {
+        this.refresh()
+      }
     },
 
     async updateWallet(id, patch) {
@@ -53,8 +60,16 @@ export const useDashboardStore = defineStore('dashboard', {
     },
 
     async deleteWallet(id) {
-      await api.delete(`/api/wallets/${id}`)
-      await this.refresh()
+      const idx = this.wallets.findIndex((w) => w.id === id)
+      const removed = idx !== -1 ? this.wallets.splice(idx, 1)[0] : null
+      try {
+        await api.delete(`/api/wallets/${id}`)
+      } catch (err) {
+        if (removed) this.wallets.splice(idx, 0, removed)
+        throw err
+      } finally {
+        this.refresh()
+      }
     },
 
     async fetchIncomes() {
