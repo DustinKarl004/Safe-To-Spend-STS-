@@ -9,7 +9,6 @@ import ProviderIcon from '@/components/ProviderIcon.vue'
 import CategoryIcon from '@/components/CategoryIcon.vue'
 import WalletPickerDrawer from '@/components/WalletPickerDrawer.vue'
 import WalletEditSheet from '@/components/WalletEditSheet.vue'
-import IncomeLogSheet from '@/components/IncomeLogSheet.vue'
 import PaydayEditSheet from '@/components/PaydayEditSheet.vue'
 import MonthPicker from '@/components/MonthPicker.vue'
 import ConfirmModal from '@/components/ConfirmModal.vue'
@@ -36,14 +35,15 @@ const addWalletOpen = ref(false)
 const editingWallet = ref(null)
 const confirmingWalletRemove = ref(false)
 const removingWallet = ref(false)
-const addIncomeOpen = ref(false)
-const incomePrefill = ref({ category: 'salary', amount: null, walletId: null })
+const savingWalletSelection = ref(false)
+const savingWalletBalance = ref(false)
 
 async function saveWalletSelection(selected) {
   const selectedNames = new Set(selected.map((s) => s.name))
   const toAdd = selected.filter((s) => !dashboard.wallets.some((w) => w.label === s.name))
   const toRemove = dashboard.wallets.filter((w) => !selectedNames.has(w.label))
 
+  savingWalletSelection.value = true
   try {
     for (const s of toAdd) {
       await dashboard.addWallet({ kind: s.kind, label: s.name, balance: 0 })
@@ -51,8 +51,11 @@ async function saveWalletSelection(selected) {
     for (const w of toRemove) {
       await dashboard.deleteWallet(w.id)
     }
+    addWalletOpen.value = false
   } catch {
     window.alert('Something went wrong saving your wallets. Please try again.')
+  } finally {
+    savingWalletSelection.value = false
   }
 }
 
@@ -60,11 +63,16 @@ function openWalletEdit(wallet) {
   editingWallet.value = wallet
 }
 
-function saveWalletEdit(id, balance) {
-  editingWallet.value = null
-  dashboard.updateWallet(id, { balance }).catch(() => {
+async function saveWalletEdit(id, balance) {
+  savingWalletBalance.value = true
+  try {
+    await dashboard.updateWallet(id, { balance })
+    editingWallet.value = null
+  } catch {
     window.alert('Something went wrong saving that wallet. Please try again.')
-  })
+  } finally {
+    savingWalletBalance.value = false
+  }
 }
 
 function askRemoveWallet() {
@@ -87,22 +95,6 @@ async function confirmRemoveWallet() {
   } finally {
     removingWallet.value = false
   }
-}
-
-function openIncomeForPayday() {
-  incomePrefill.value = {
-    category: auth.user?.payday_category || 'salary',
-    amount: auth.user?.payday_amount ?? null,
-    walletId: auth.user?.payday_wallet_id ?? null,
-  }
-  addIncomeOpen.value = true
-}
-
-function handleLogIncome(payload) {
-  addIncomeOpen.value = false
-  dashboard.logIncome(payload).catch(() => {
-    window.alert('Something went wrong logging that income. Please try again.')
-  })
 }
 
 // ---- net this month, with month/year navigation ----
@@ -147,16 +139,45 @@ const daysUntilPayday = computed(() => {
 
 const paydayWallet = computed(() => dashboard.wallets.find((w) => w.id === auth.user?.payday_wallet_id) || null)
 const paydayCategoryInfo = computed(() => incomeCategory(auth.user?.payday_category || 'salary'))
-const hasExpectedInfo = computed(() => Boolean(auth.user?.payday_amount || auth.user?.payday_wallet_id))
+const hasExpectedInfo = computed(() =>
+  Boolean(auth.user?.next_payday || auth.user?.payday_amount || auth.user?.payday_wallet_id),
+)
+
+const savingPayday = ref(false)
+const confirmingPaydayRemove = ref(false)
+const removingPayday = ref(false)
 
 async function savePayday(payload) {
-  await auth.setPayday(payload)
-  editingPayday.value = false
+  savingPayday.value = true
+  try {
+    await auth.setPayday(payload)
+    editingPayday.value = false
+  } catch {
+    window.alert('Something went wrong saving your payday. Please try again.')
+  } finally {
+    savingPayday.value = false
+  }
 }
 
-async function removeExpectedPayday() {
-  await auth.setPayday({ amount: null, wallet_id: null, category: null, note: null })
-  editingPayday.value = false
+function askRemovePayday() {
+  confirmingPaydayRemove.value = true
+}
+
+function cancelRemovePayday() {
+  confirmingPaydayRemove.value = false
+}
+
+async function confirmRemovePayday() {
+  removingPayday.value = true
+  try {
+    await auth.setPayday({ next_payday: null, amount: null, wallet_id: null, category: null, note: null })
+    confirmingPaydayRemove.value = false
+    editingPayday.value = false
+  } catch {
+    window.alert('Something went wrong removing your payday info. Please try again.')
+  } finally {
+    removingPayday.value = false
+  }
 }
 </script>
 
@@ -235,14 +256,6 @@ async function removeExpectedPayday() {
             </p>
           </div>
         </div>
-
-        <button
-          type="button"
-          class="w-full rounded-xl border border-dashed border-border py-2.5 text-sm font-semibold text-accent"
-          @click="openIncomeForPayday"
-        >
-          + Log this payday's income
-        </button>
       </div>
 
       <p v-else class="mt-3 text-sm text-text-dim">No payday set yet.</p>
@@ -294,6 +307,7 @@ async function removeExpectedPayday() {
     <WalletPickerDrawer
       :open="addWalletOpen"
       :selected-names="dashboard.wallets.map((w) => w.label)"
+      :saving="savingWalletSelection"
       @close="addWalletOpen = false"
       @save="saveWalletSelection"
     />
@@ -301,6 +315,7 @@ async function removeExpectedPayday() {
     <WalletEditSheet
       :open="Boolean(editingWallet)"
       :wallet="editingWallet"
+      :saving="savingWalletBalance"
       @close="editingWallet = null"
       @save="saveWalletEdit"
       @remove="askRemoveWallet"
@@ -315,16 +330,6 @@ async function removeExpectedPayday() {
       @confirm="confirmRemoveWallet"
     />
 
-    <IncomeLogSheet
-      :open="addIncomeOpen"
-      :wallets="dashboard.wallets"
-      :default-category="incomePrefill.category"
-      :default-amount="incomePrefill.amount"
-      :default-wallet-id="incomePrefill.walletId"
-      @close="addIncomeOpen = false"
-      @submit="handleLogIncome"
-    />
-
     <PaydayEditSheet
       :open="editingPayday"
       :wallets="dashboard.wallets"
@@ -335,9 +340,19 @@ async function removeExpectedPayday() {
       :initial-amount="auth.user?.payday_amount ?? null"
       :initial-note="auth.user?.payday_note || ''"
       :has-expected-info="hasExpectedInfo"
+      :saving="savingPayday"
       @close="editingPayday = false"
       @save="savePayday"
-      @remove="removeExpectedPayday"
+      @remove="askRemovePayday"
+    />
+
+    <ConfirmModal
+      :open="confirmingPaydayRemove"
+      title="Remove your payday?"
+      message="This will clear your payday date, expected amount, and wallet. You can set it up again anytime."
+      :busy="removingPayday"
+      @cancel="cancelRemovePayday"
+      @confirm="confirmRemovePayday"
     />
   </div>
 </template>

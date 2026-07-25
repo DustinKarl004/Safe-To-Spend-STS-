@@ -129,19 +129,6 @@ class IncomeOut(BaseModel):
     created_at: datetime
 
 
-# ---- fixed obligations ----
-class ObligationCreate(BaseModel):
-    label: str = Field(max_length=80)
-    amount: float = Field(ge=0)
-
-
-class ObligationOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: int
-    label: str
-    amount: float
-
-
 # ---- expenses ----
 CATEGORY_PATTERN = (
     "^(food|groceries|transpo|bills|shopping|entertainment|games|health|education"
@@ -179,10 +166,8 @@ class ExpenseOut(BaseModel):
 class DashboardOut(BaseModel):
     safe_to_spend_today: float
     total_wallet_balance: float
-    total_reserved: float
     days_remaining: int
     next_payday: date | None
     spent_today: float
     wallets: list[WalletOut]
-    obligations: list[ObligationOut]
     recent_expenses: list[ExpenseOut]

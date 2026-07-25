@@ -16,6 +16,7 @@ const props = defineProps({
   initialAmount: { type: Number, default: null },
   initialNote: { type: String, default: '' },
   hasExpectedInfo: { type: Boolean, default: false },
+  saving: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close', 'save', 'remove'])
 
@@ -24,8 +25,6 @@ const category = ref('salary')
 const walletId = ref(null)
 const amountStr = ref('')
 const note = ref('')
-const saving = ref(false)
-const removing = ref(false)
 
 watch(
   () => props.open,
@@ -42,29 +41,19 @@ watch(
 
 const canSave = computed(() => Boolean(date.value) && Number(amountStr.value) > 0 && walletId.value)
 
-async function handleSave() {
-  if (!canSave.value) return
-  saving.value = true
-  try {
-    await emit('save', {
-      next_payday: date.value,
-      category: category.value,
-      wallet_id: walletId.value,
-      amount: amountStr.value === '' ? null : Number(amountStr.value),
-      note: note.value.trim() || null,
-    })
-  } finally {
-    saving.value = false
-  }
+function handleSave() {
+  if (!canSave.value || props.saving) return
+  emit('save', {
+    next_payday: date.value,
+    category: category.value,
+    wallet_id: walletId.value,
+    amount: amountStr.value === '' ? null : Number(amountStr.value),
+    note: note.value.trim() || null,
+  })
 }
 
-async function handleRemove() {
-  removing.value = true
-  try {
-    await emit('remove')
-  } finally {
-    removing.value = false
-  }
+function handleRemove() {
+  emit('remove')
 }
 </script>
 
@@ -160,11 +149,11 @@ async function handleRemove() {
         <button
           v-if="hasExpectedInfo"
           type="button"
-          :disabled="removing"
+          :disabled="saving"
           class="rounded-xl border border-border px-4 py-3 text-sm font-bold text-danger disabled:opacity-40"
           @click="handleRemove"
         >
-          Remove
+          Delete payday
         </button>
         <button
           type="button"

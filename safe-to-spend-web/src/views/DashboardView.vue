@@ -131,8 +131,7 @@ const emptyMessage = computed(() => {
 
             <div class="flex w-full flex-col text-center sm:text-left">
               <p class="text-sm text-text-dim">
-                ₱{{ money(dashboard.totalWalletBalance) }} left across wallets, after ₱{{ money(dashboard.totalReserved) }}
-                reserved · ₱{{ money(dashboard.spentToday) }} spent today
+                ₱{{ money(dashboard.totalWalletBalance) }} left across wallets · ₱{{ money(dashboard.spentToday) }} spent today
               </p>
 
               <RouterLink
@@ -249,7 +248,7 @@ const emptyMessage = computed(() => {
         </div>
       </div>
 
-      <!-- Wallets & reserved -->
+      <!-- Wallets -->
       <div class="flex flex-col gap-6">
         <RouterLink
           :to="{ name: 'balance' }"
@@ -266,21 +265,6 @@ const emptyMessage = computed(() => {
             Across {{ dashboard.wallets.length }} wallet{{ dashboard.wallets.length === 1 ? '' : 's' }}
           </p>
         </RouterLink>
-
-        <div v-if="dashboard.obligations.length" class="rounded-2xl border border-border bg-bg-raised p-6 shadow-sm">
-          <h2 class="font-display text-base font-bold">Reserved</h2>
-          <ul class="mt-3 flex flex-col gap-2.5">
-            <li
-              v-for="obligation in dashboard.obligations"
-              :key="obligation.id"
-              class="flex items-center justify-between rounded-xl px-3.5 py-2.5"
-              style="background: color-mix(in srgb, var(--amber) 12%, transparent)"
-            >
-              <p class="text-sm font-semibold" style="color: var(--amber)">{{ obligation.label }}</p>
-              <span class="text-sm font-bold tabular-nums" style="color: var(--amber)">₱{{ money(obligation.amount) }}</span>
-            </li>
-          </ul>
-        </div>
       </div>
     </div>
   </div>

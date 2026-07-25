@@ -28,7 +28,6 @@ class User(Base):
     wallets: Mapped[list["Wallet"]] = relationship(
         back_populates="owner", foreign_keys="Wallet.user_id", cascade="all, delete-orphan"
     )
-    obligations: Mapped[list["FixedObligation"]] = relationship(back_populates="owner", cascade="all, delete-orphan")
     expenses: Mapped[list["Expense"]] = relationship(back_populates="owner", cascade="all, delete-orphan")
     wallet_adjustments: Mapped[list["WalletAdjustment"]] = relationship(
         back_populates="owner", cascade="all, delete-orphan"
@@ -74,17 +73,6 @@ class Income(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     owner: Mapped["User"] = relationship(back_populates="incomes")
-
-
-class FixedObligation(Base):
-    __tablename__ = "fixed_obligations"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    label: Mapped[str] = mapped_column(String(80))
-    amount: Mapped[float] = mapped_column(Numeric(12, 2))
-
-    owner: Mapped["User"] = relationship(back_populates="obligations")
 
 
 class Expense(Base):

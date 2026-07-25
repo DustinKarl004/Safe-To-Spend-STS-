@@ -6,12 +6,11 @@ import { providerIcon } from '@/lib/walletProviders'
 const props = defineProps({
   open: { type: Boolean, default: false },
   wallet: { type: Object, default: null },
+  saving: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close', 'save', 'remove'])
 
 const balanceInput = ref('')
-const saving = ref(false)
-const removing = ref(false)
 
 watch(
   () => props.wallet,
@@ -21,24 +20,14 @@ watch(
   { immediate: true },
 )
 
-async function handleSave() {
-  if (!props.wallet || balanceInput.value === '') return
-  saving.value = true
-  try {
-    await emit('save', props.wallet.id, Number(balanceInput.value))
-  } finally {
-    saving.value = false
-  }
+function handleSave() {
+  if (!props.wallet || balanceInput.value === '' || props.saving) return
+  emit('save', props.wallet.id, Number(balanceInput.value))
 }
 
-async function handleRemove() {
+function handleRemove() {
   if (!props.wallet) return
-  removing.value = true
-  try {
-    await emit('remove', props.wallet.id)
-  } finally {
-    removing.value = false
-  }
+  emit('remove', props.wallet.id)
 }
 </script>
 
@@ -89,7 +78,7 @@ async function handleRemove() {
         <button
           type="button"
           class="rounded-xl border border-border px-4 py-3 text-sm font-bold text-danger disabled:opacity-40"
-          :disabled="removing"
+          :disabled="saving"
           @click="handleRemove"
         >
           Remove

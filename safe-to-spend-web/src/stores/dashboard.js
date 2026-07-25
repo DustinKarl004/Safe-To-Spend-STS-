@@ -13,12 +13,10 @@ export const useDashboardStore = defineStore('dashboard', {
     loading: false,
     safeToSpendToday: 0,
     totalWalletBalance: 0,
-    totalReserved: 0,
     daysRemaining: 0,
     nextPayday: null,
     spentToday: 0,
     wallets: [],
-    obligations: [],
     recentExpenses: [],
     allExpenses: [],
     walletAdjustments: [],
@@ -32,12 +30,10 @@ export const useDashboardStore = defineStore('dashboard', {
         const { data } = await api.get('/api/dashboard')
         this.safeToSpendToday = data.safe_to_spend_today
         this.totalWalletBalance = data.total_wallet_balance
-        this.totalReserved = data.total_reserved
         this.daysRemaining = data.days_remaining
         this.nextPayday = data.next_payday
         this.spentToday = data.spent_today
         this.wallets = data.wallets
-        this.obligations = data.obligations
         this.recentExpenses = data.recent_expenses
       } finally {
         this.loading = false
@@ -126,16 +122,6 @@ export const useDashboardStore = defineStore('dashboard', {
       } finally {
         this.refresh()
       }
-    },
-
-    async addObligation(obligation) {
-      await api.post('/api/obligations', obligation)
-      await this.refresh()
-    },
-
-    async deleteObligation(id) {
-      await api.delete(`/api/obligations/${id}`)
-      await this.refresh()
     },
 
     async logExpense(expense) {

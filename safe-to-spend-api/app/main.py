@@ -22,7 +22,7 @@ from app.core.security import (
     verify_password,
 )
 from app.database import Base, engine, get_db
-from app.models import Expense, FixedObligation, Income, User, Wallet, WalletAdjustment
+from app.models import Expense, Income, User, Wallet, WalletAdjustment
 from app.schemas import (
     ChangePasswordRequest,
     DashboardOut,
@@ -34,8 +34,6 @@ from app.schemas import (
     IncomeUpdate,
     LoginOut,
     MfaLoginRequest,
-    ObligationCreate,
-    ObligationOut,
     PaydayUpdate,
     Token,
     TwoFactorDisableRequest,
@@ -401,36 +399,6 @@ def delete_income(income_id: int, current_user: User = Depends(get_current_user)
 
 
 # ---------------------------------------------------------------------------
-# fixed obligations (bills/rent reserved)
-# ---------------------------------------------------------------------------
-@app.get("/api/obligations", response_model=list[ObligationOut])
-def list_obligations(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return db.scalars(select(FixedObligation).where(FixedObligation.user_id == current_user.id)).all()
-
-
-@app.post("/api/obligations", response_model=ObligationOut, status_code=status.HTTP_201_CREATED)
-def create_obligation(
-    payload: ObligationCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
-):
-    obligation = FixedObligation(user_id=current_user.id, **payload.model_dump())
-    db.add(obligation)
-    db.commit()
-    db.refresh(obligation)
-    return obligation
-
-
-@app.delete("/api/obligations/{obligation_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_obligation(
-    obligation_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
-):
-    obligation = db.get(FixedObligation, obligation_id)
-    if not obligation or obligation.user_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Obligation not found")
-    db.delete(obligation)
-    db.commit()
-
-
-# ---------------------------------------------------------------------------
 # expenses
 # ---------------------------------------------------------------------------
 @app.get("/api/expenses", response_model=list[ExpenseOut])
@@ -526,13 +494,11 @@ def delete_expense(expense_id: int, current_user: User = Depends(get_current_use
 @app.get("/api/dashboard", response_model=DashboardOut)
 def dashboard(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     wallets = db.scalars(select(Wallet).where(Wallet.user_id == current_user.id)).all()
-    obligations = db.scalars(select(FixedObligation).where(FixedObligation.user_id == current_user.id)).all()
     recent_expenses = db.scalars(
         select(Expense).where(Expense.user_id == current_user.id).order_by(Expense.created_at.desc()).limit(20)
     ).all()
 
     total_balance = sum(float(w.balance) for w in wallets)
-    total_reserved = sum(float(o.amount) for o in obligations)
 
     today = datetime.now(settings.tzinfo).date()
     if current_user.next_payday and current_user.next_payday > today:
@@ -540,7 +506,7 @@ def dashboard(current_user: User = Depends(get_current_user), db: Session = Depe
     else:
         days_remaining = 1
 
-    base_daily_allowance = max((total_balance - total_reserved), 0) / days_remaining
+    base_daily_allowance = max(total_balance, 0) / days_remaining
 
     def _local_date(dt: datetime) -> date:
         if dt.tzinfo is None:
@@ -555,12 +521,10 @@ def dashboard(current_user: User = Depends(get_current_user), db: Session = Depe
     return DashboardOut(
         safe_to_spend_today=round(safe_to_spend_today, 2),
         total_wallet_balance=round(total_balance, 2),
-        total_reserved=round(total_reserved, 2),
         days_remaining=days_remaining,
         next_payday=current_user.next_payday,
         spent_today=round(spent_today, 2),
         wallets=wallets,
-        obligations=obligations,
         recent_expenses=recent_expenses,
     )
 

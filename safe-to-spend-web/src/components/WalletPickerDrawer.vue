@@ -6,6 +6,7 @@ import ProviderIcon from './ProviderIcon.vue'
 const props = defineProps({
   open: { type: Boolean, default: false },
   selectedNames: { type: Array, default: () => [] },
+  saving: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close', 'save'])
 
@@ -42,11 +43,11 @@ function clearGroup(group) {
 }
 
 function finish() {
+  if (props.saving) return
   const selected = WALLET_GROUPS.flatMap((group) =>
     group.providers.filter((p) => pending.has(p.name)).map((p) => ({ kind: group.kind, name: p.name })),
   )
   emit('save', selected)
-  emit('close')
 }
 </script>
 
@@ -66,8 +67,9 @@ function finish() {
         <h2 class="font-display text-base font-bold">Add a wallet or bank</h2>
         <button
           type="button"
-          class="flex h-8 w-8 items-center justify-center rounded-full text-text-dim hover:bg-bg-sunken hover:text-text"
+          class="flex h-8 w-8 items-center justify-center rounded-full text-text-dim hover:bg-bg-sunken hover:text-text disabled:opacity-60"
           aria-label="Close"
+          :disabled="saving"
           @click="finish"
         >
           ✕
@@ -115,10 +117,11 @@ function finish() {
       <div class="border-t border-border px-5 py-4">
         <button
           type="button"
-          class="w-full rounded-xl bg-accent py-3 text-sm font-bold text-accent-text"
+          class="w-full rounded-xl bg-accent py-3 text-sm font-bold text-accent-text disabled:opacity-60"
+          :disabled="saving"
           @click="finish"
         >
-          Done
+          {{ saving ? 'Saving…' : 'Done' }}
         </button>
       </div>
     </aside>
