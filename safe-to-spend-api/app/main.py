@@ -1,0 +1,492 @@
+import base64
+import io
+from datetime import date, datetime, timezone
+
+import pyotp
+import qrcode
+import qrcode.image.svg
+from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy import inspect, select, text
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
+from app.core.security import (
+    create_access_token,
+    create_mfa_challenge_token,
+    decode_mfa_challenge_token,
+    get_current_user,
+    hash_password,
+    verify_password,
+)
+from app.database import Base, engine, get_db
+from app.models import Expense, FixedObligation, Income, User, Wallet, WalletAdjustment
+from app.schemas import (
+    ChangePasswordRequest,
+    DashboardOut,
+    ExpenseCreate,
+    ExpenseOut,
+    ExpenseUpdate,
+    IncomeCreate,
+    IncomeOut,
+    LoginOut,
+    MfaLoginRequest,
+    ObligationCreate,
+    ObligationOut,
+    PaydayUpdate,
+    Token,
+    TwoFactorDisableRequest,
+    TwoFactorSetupOut,
+    TwoFactorVerifyRequest,
+    UserCreate,
+    UserOut,
+    WalletAdjustmentOut,
+    WalletCreate,
+    WalletOut,
+    WalletUpdate,
+)
+
+Base.metadata.create_all(bind=engine)
+
+
+def _ensure_columns():
+    """create_all only creates missing tables, not missing columns on existing ones."""
+    expected = {
+        "users": {
+            "next_payday": "DATE",
+            "payday_amount": "NUMERIC(12, 2)",
+            "payday_wallet_id": "INTEGER",
+            "payday_category": "VARCHAR(20)",
+            "payday_note": "VARCHAR(140)",
+            "totp_secret": "VARCHAR(32)",
+            "totp_enabled": "BOOLEAN DEFAULT 0",
+        },
+        "expenses": {
+            "wallet_id": "INTEGER",
+            "wallet_label": "VARCHAR(50)",
+        },
+    }
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    with engine.begin() as conn:
+        for table, columns in expected.items():
+            if table not in tables:
+                continue
+            existing = {col["name"] for col in inspector.get_columns(table)}
+            for name, sql_type in columns.items():
+                if name not in existing:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}"))
+
+
+_ensure_columns()
+
+app = FastAPI(title="Safe-to-Spend API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origin_list,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ---------------------------------------------------------------------------
+# auth
+# ---------------------------------------------------------------------------
+@app.post("/api/auth/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+def register(payload: UserCreate, db: Session = Depends(get_db)):
+    existing = db.scalar(select(User).where(User.email == payload.email))
+    if existing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+
+    user = User(email=payload.email, hashed_password=hash_password(payload.password))
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.post("/api/auth/login", response_model=LoginOut)
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = db.scalar(select(User).where(User.email == form_data.username))
+    if not user or not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password")
+
+    if user.totp_enabled:
+        return LoginOut(requires_2fa=True, mfa_token=create_mfa_challenge_token(subject=str(user.id)))
+
+    return LoginOut(access_token=create_access_token(subject=str(user.id)))
+
+
+@app.post("/api/auth/login/2fa", response_model=Token)
+def login_2fa(payload: MfaLoginRequest, db: Session = Depends(get_db)):
+    user_id = decode_mfa_challenge_token(payload.mfa_token)
+    user = db.get(User, int(user_id))
+    if not user or not user.totp_enabled or not user.totp_secret:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired 2FA challenge")
+
+    if not pyotp.TOTP(user.totp_secret).verify(payload.code, valid_window=1):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect code")
+
+    return Token(access_token=create_access_token(subject=str(user.id)))
+
+
+@app.post("/api/auth/change-password", response_model=UserOut)
+def change_password(
+    payload: ChangePasswordRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    if not verify_password(payload.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect")
+
+    current_user.hashed_password = hash_password(payload.new_password)
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+
+@app.post("/api/auth/2fa/setup", response_model=TwoFactorSetupOut)
+def setup_2fa(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    secret = pyotp.random_base32()
+    current_user.totp_secret = secret
+    current_user.totp_enabled = False
+    db.commit()
+
+    uri = pyotp.TOTP(secret).provisioning_uri(name=current_user.email, issuer_name="Safe-to-Spend")
+
+    qr_img = qrcode.make(uri, image_factory=qrcode.image.svg.SvgPathImage)
+    buf = io.BytesIO()
+    qr_img.save(buf)
+    qr_data_uri = f"data:image/svg+xml;base64,{base64.b64encode(buf.getvalue()).decode()}"
+
+    return TwoFactorSetupOut(secret=secret, otpauth_uri=uri, qr_code_data_uri=qr_data_uri)
+
+
+@app.post("/api/auth/2fa/verify", response_model=UserOut)
+def verify_2fa(
+    payload: TwoFactorVerifyRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    if not current_user.totp_secret:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Start 2FA setup first")
+
+    if not pyotp.TOTP(current_user.totp_secret).verify(payload.code, valid_window=1):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect code")
+
+    current_user.totp_enabled = True
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+
+@app.post("/api/auth/2fa/disable", response_model=UserOut)
+def disable_2fa(
+    payload: TwoFactorDisableRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    if not verify_password(payload.password, current_user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect password")
+
+    current_user.totp_secret = None
+    current_user.totp_enabled = False
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+
+@app.get("/api/auth/me", response_model=UserOut)
+def me(current_user: User = Depends(get_current_user)):
+    return current_user
+
+
+# ---------------------------------------------------------------------------
+# payday
+# ---------------------------------------------------------------------------
+@app.put("/api/payday", response_model=UserOut)
+def set_payday(payload: PaydayUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    updates = payload.model_dump(exclude_unset=True)
+
+    if "wallet_id" in updates and updates["wallet_id"] is not None:
+        _get_owned_wallet(updates["wallet_id"], current_user, db)
+
+    if "next_payday" in updates:
+        current_user.next_payday = updates["next_payday"]
+    if "amount" in updates:
+        current_user.payday_amount = updates["amount"]
+    if "wallet_id" in updates:
+        current_user.payday_wallet_id = updates["wallet_id"]
+    if "category" in updates:
+        current_user.payday_category = updates["category"]
+    if "note" in updates:
+        current_user.payday_note = updates["note"]
+
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+
+# ---------------------------------------------------------------------------
+# wallets
+# ---------------------------------------------------------------------------
+@app.get("/api/wallets", response_model=list[WalletOut])
+def list_wallets(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return db.scalars(select(Wallet).where(Wallet.user_id == current_user.id)).all()
+
+
+@app.post("/api/wallets", response_model=WalletOut, status_code=status.HTTP_201_CREATED)
+def create_wallet(payload: WalletCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    wallet = Wallet(user_id=current_user.id, **payload.model_dump())
+    db.add(wallet)
+    db.commit()
+    db.refresh(wallet)
+    return wallet
+
+
+def _get_owned_wallet(wallet_id: int, current_user: User, db: Session) -> Wallet:
+    wallet = db.get(Wallet, wallet_id)
+    if not wallet or wallet.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Wallet not found")
+    return wallet
+
+
+@app.patch("/api/wallets/{wallet_id}", response_model=WalletOut)
+def update_wallet(
+    wallet_id: int,
+    payload: WalletUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    wallet = _get_owned_wallet(wallet_id, current_user, db)
+    updates = payload.model_dump(exclude_unset=True)
+
+    if "balance" in updates:
+        delta = updates["balance"] - float(wallet.balance)
+        if delta != 0:
+            db.add(
+                WalletAdjustment(
+                    user_id=current_user.id,
+                    wallet_id=wallet.id,
+                    wallet_label=wallet.label,
+                    delta=delta,
+                )
+            )
+
+    for field, value in updates.items():
+        setattr(wallet, field, value)
+    db.commit()
+    db.refresh(wallet)
+    return wallet
+
+
+@app.delete("/api/wallets/{wallet_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_wallet(wallet_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    wallet = _get_owned_wallet(wallet_id, current_user, db)
+    db.delete(wallet)
+    db.commit()
+
+
+@app.get("/api/wallets/adjustments", response_model=list[WalletAdjustmentOut])
+def list_wallet_adjustments(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    stmt = (
+        select(WalletAdjustment)
+        .where(WalletAdjustment.user_id == current_user.id)
+        .order_by(WalletAdjustment.created_at.desc())
+    )
+    return db.scalars(stmt).all()
+
+
+# ---------------------------------------------------------------------------
+# income (salary, interest, investment, cashback, allowance, bonus, other)
+# ---------------------------------------------------------------------------
+@app.get("/api/income", response_model=list[IncomeOut])
+def list_income(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    stmt = select(Income).where(Income.user_id == current_user.id).order_by(Income.created_at.desc())
+    return db.scalars(stmt).all()
+
+
+@app.post("/api/income", response_model=IncomeOut, status_code=status.HTTP_201_CREATED)
+def create_income(payload: IncomeCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    wallet = _get_owned_wallet(payload.wallet_id, current_user, db)
+
+    now = datetime.now(timezone.utc)
+    created_at = datetime.combine(payload.entry_date, now.time(), tzinfo=timezone.utc) if payload.entry_date else now
+
+    income = Income(
+        user_id=current_user.id,
+        wallet_id=wallet.id,
+        wallet_label=wallet.label,
+        amount=payload.amount,
+        category=payload.category,
+        note=payload.note,
+        created_at=created_at,
+    )
+    wallet.balance = float(wallet.balance) + payload.amount
+
+    db.add(income)
+    db.commit()
+    db.refresh(income)
+    return income
+
+
+@app.delete("/api/income/{income_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_income(income_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    income = db.get(Income, income_id)
+    if not income or income.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Income entry not found")
+
+    wallet = db.get(Wallet, income.wallet_id)
+    if wallet:
+        wallet.balance = float(wallet.balance) - float(income.amount)
+
+    db.delete(income)
+    db.commit()
+
+
+# ---------------------------------------------------------------------------
+# fixed obligations (bills/rent reserved)
+# ---------------------------------------------------------------------------
+@app.get("/api/obligations", response_model=list[ObligationOut])
+def list_obligations(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return db.scalars(select(FixedObligation).where(FixedObligation.user_id == current_user.id)).all()
+
+
+@app.post("/api/obligations", response_model=ObligationOut, status_code=status.HTTP_201_CREATED)
+def create_obligation(
+    payload: ObligationCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    obligation = FixedObligation(user_id=current_user.id, **payload.model_dump())
+    db.add(obligation)
+    db.commit()
+    db.refresh(obligation)
+    return obligation
+
+
+@app.delete("/api/obligations/{obligation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_obligation(
+    obligation_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    obligation = db.get(FixedObligation, obligation_id)
+    if not obligation or obligation.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Obligation not found")
+    db.delete(obligation)
+    db.commit()
+
+
+# ---------------------------------------------------------------------------
+# expenses
+# ---------------------------------------------------------------------------
+@app.get("/api/expenses", response_model=list[ExpenseOut])
+def list_expenses(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    stmt = select(Expense).where(Expense.user_id == current_user.id).order_by(Expense.created_at.desc())
+    return db.scalars(stmt).all()
+
+
+def _get_owned_expense(expense_id: int, current_user: User, db: Session) -> Expense:
+    expense = db.get(Expense, expense_id)
+    if not expense or expense.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Expense not found")
+    return expense
+
+
+@app.post("/api/expenses", response_model=ExpenseOut, status_code=status.HTTP_201_CREATED)
+def create_expense(payload: ExpenseCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    wallet = _get_owned_wallet(payload.wallet_id, current_user, db)
+
+    now = datetime.now(timezone.utc)
+    created_at = datetime.combine(payload.entry_date, now.time(), tzinfo=timezone.utc) if payload.entry_date else now
+
+    expense = Expense(
+        user_id=current_user.id,
+        wallet_id=wallet.id,
+        wallet_label=wallet.label,
+        amount=payload.amount,
+        category=payload.category,
+        note=payload.note,
+        created_at=created_at,
+    )
+    wallet.balance = float(wallet.balance) - payload.amount
+
+    db.add(expense)
+    db.commit()
+    db.refresh(expense)
+    return expense
+
+
+@app.patch("/api/expenses/{expense_id}", response_model=ExpenseOut)
+def update_expense(
+    expense_id: int,
+    payload: ExpenseUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    expense = _get_owned_expense(expense_id, current_user, db)
+    updates = payload.model_dump(exclude_unset=True)
+
+    if "amount" in updates and expense.wallet_id:
+        wallet = db.get(Wallet, expense.wallet_id)
+        if wallet:
+            delta = updates["amount"] - float(expense.amount)
+            wallet.balance = float(wallet.balance) - delta
+
+    for field, value in updates.items():
+        setattr(expense, field, value)
+    db.commit()
+    db.refresh(expense)
+    return expense
+
+
+@app.delete("/api/expenses/{expense_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_expense(expense_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    expense = _get_owned_expense(expense_id, current_user, db)
+
+    if expense.wallet_id:
+        wallet = db.get(Wallet, expense.wallet_id)
+        if wallet:
+            wallet.balance = float(wallet.balance) + float(expense.amount)
+
+    db.delete(expense)
+    db.commit()
+
+
+# ---------------------------------------------------------------------------
+# dashboard / safe-to-spend calculation
+# ---------------------------------------------------------------------------
+@app.get("/api/dashboard", response_model=DashboardOut)
+def dashboard(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    wallets = db.scalars(select(Wallet).where(Wallet.user_id == current_user.id)).all()
+    obligations = db.scalars(select(FixedObligation).where(FixedObligation.user_id == current_user.id)).all()
+    recent_expenses = db.scalars(
+        select(Expense).where(Expense.user_id == current_user.id).order_by(Expense.created_at.desc()).limit(20)
+    ).all()
+
+    total_balance = sum(float(w.balance) for w in wallets)
+    total_reserved = sum(float(o.amount) for o in obligations)
+
+    today = datetime.now(timezone.utc).date()
+    if current_user.next_payday and current_user.next_payday > today:
+        days_remaining = (current_user.next_payday - today).days
+    else:
+        days_remaining = 1
+
+    base_daily_allowance = max((total_balance - total_reserved), 0) / days_remaining
+
+    spent_today = sum(
+        float(e.amount) for e in recent_expenses if e.created_at.date() == today
+    )
+    safe_to_spend_today = base_daily_allowance - spent_today
+
+    return DashboardOut(
+        safe_to_spend_today=round(safe_to_spend_today, 2),
+        total_wallet_balance=round(total_balance, 2),
+        total_reserved=round(total_reserved, 2),
+        days_remaining=days_remaining,
+        next_payday=current_user.next_payday,
+        spent_today=round(spent_today, 2),
+        wallets=wallets,
+        obligations=obligations,
+        recent_expenses=recent_expenses,
+    )
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}

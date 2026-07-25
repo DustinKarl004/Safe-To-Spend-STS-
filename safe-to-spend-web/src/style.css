@@ -1,0 +1,103 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #0a0f1d;
+  --paper: #f5f7fb;
+  --signal-light: #0e9aa6;
+  --signal-dark: #5eead4;
+  --amber: #e08a1e;
+  --safe: #1e9e6b;
+  --danger: #d6473c;
+
+  --bg: var(--paper);
+  --bg-raised: #ffffff;
+  --bg-sunken: #ebeef4;
+  --text: #12172a;
+  --text-dim: #5a6178;
+  --border: #dde2ec;
+  --accent: var(--signal-light);
+  --accent-text: #ffffff;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: var(--ink);
+    --bg-raised: #111729;
+    --bg-sunken: #080c16;
+    --text: #eaf0f7;
+    --text-dim: #8993ac;
+    --border: #212a42;
+    --accent: var(--signal-dark);
+    --accent-text: #06222a;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='light'] {
+  --bg: var(--paper);
+  --bg-raised: #ffffff;
+  --bg-sunken: #ebeef4;
+  --text: #12172a;
+  --text-dim: #5a6178;
+  --border: #dde2ec;
+  --accent: var(--signal-light);
+  --accent-text: #ffffff;
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --bg: var(--ink);
+  --bg-raised: #111729;
+  --bg-sunken: #080c16;
+  --text: #eaf0f7;
+  --text-dim: #8993ac;
+  --border: #212a42;
+  --accent: var(--signal-dark);
+  --accent-text: #06222a;
+  color-scheme: dark;
+}
+
+@theme {
+  --color-bg: var(--bg);
+  --color-bg-raised: var(--bg-raised);
+  --color-bg-sunken: var(--bg-sunken);
+  --color-text: var(--text);
+  --color-text-dim: var(--text-dim);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-text: var(--accent-text);
+  --color-amber: var(--amber);
+  --color-safe: var(--safe);
+  --color-danger: var(--danger);
+
+  --font-display: 'STSRounded', ui-rounded, -apple-system, 'Segoe UI', system-ui, sans-serif;
+  --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+button {
+  font-family: inherit;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}

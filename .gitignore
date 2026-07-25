@@ -1,0 +1,13 @@
+# Backend
+safe-to-spend-api/.venv/
+safe-to-spend-api/__pycache__/
+safe-to-spend-api/**/__pycache__/
+safe-to-spend-api/*.db
+safe-to-spend-api/.env
+
+# Frontend
+safe-to-spend-web/node_modules/
+safe-to-spend-web/dist/
+
+# OS
+.DS_Store
