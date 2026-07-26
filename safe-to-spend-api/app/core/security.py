@@ -1,8 +1,9 @@
 from datetime import datetime, timedelta, timezone
 
+import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
+from jwt import PyJWTError
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
@@ -38,7 +39,7 @@ def decode_mfa_challenge_token(token: str) -> str:
     error = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired 2FA challenge")
     try:
         payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
-    except JWTError:
+    except PyJWTError:
         raise error
     if not payload.get("mfa") or payload.get("sub") is None:
         raise error
@@ -56,7 +57,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         user_id = payload.get("sub")
         if user_id is None:
             raise credentials_error
-    except JWTError:
+    except PyJWTError:
         raise credentials_error
 
     user = db.get(User, int(user_id))
