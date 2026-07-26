@@ -18,7 +18,6 @@ const dashboard = useDashboardStore()
 const auth = useAuthStore()
 
 onMounted(() => {
-  console.log('[BalanceView] mounted, hasLoaded =', dashboard.hasLoaded)
   dashboard.refresh()
   dashboard.fetchAllExpenses()
   dashboard.fetchWalletAdjustments()

@@ -13,7 +13,6 @@ const dashboard = useDashboardStore()
 const auth = useAuthStore()
 
 onMounted(() => {
-  console.log('[DashboardView] mounted, hasLoaded =', dashboard.hasLoaded)
   dashboard.refresh()
   dashboard.fetchAllExpenses()
 })

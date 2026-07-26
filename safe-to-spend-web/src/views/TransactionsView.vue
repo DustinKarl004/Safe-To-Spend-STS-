@@ -16,7 +16,6 @@ import LoadingState from '@/components/LoadingState.vue'
 const dashboard = useDashboardStore()
 
 onMounted(() => {
-  console.log('[TransactionsView] mounted, hasLoaded =', dashboard.hasLoaded)
   dashboard.refresh()
   dashboard.fetchAllExpenses()
   dashboard.fetchIncomes()

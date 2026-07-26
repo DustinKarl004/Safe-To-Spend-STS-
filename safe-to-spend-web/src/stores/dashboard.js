@@ -26,7 +26,6 @@ export const useDashboardStore = defineStore('dashboard', {
 
   actions: {
     async refresh() {
-      console.log('[dashboard] refresh start, hasLoaded =', this.hasLoaded)
       this.loading = true
       try {
         const { data } = await api.get('/api/dashboard')
@@ -40,7 +39,6 @@ export const useDashboardStore = defineStore('dashboard', {
       } finally {
         this.loading = false
         this.hasLoaded = true
-        console.log('[dashboard] refresh done, hasLoaded =', this.hasLoaded)
       }
     },
 
