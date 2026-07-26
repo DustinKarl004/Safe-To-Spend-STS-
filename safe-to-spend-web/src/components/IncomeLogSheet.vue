@@ -145,7 +145,12 @@ async function handleSubmit() {
           >
             <ProviderIcon v-bind="providerIcon(wallet.label)" :size="34" />
             <span class="min-w-0 flex-1 truncate text-sm font-semibold">{{ wallet.label }}</span>
-            <span class="shrink-0 text-xs font-semibold text-text-dim">{{ formatPeso(wallet.balance) }}</span>
+            <span class="shrink-0 text-xs font-semibold text-text-dim">
+              <template v-if="walletId === wallet.id && Number(amountStr) > 0">
+                {{ formatPeso(wallet.balance) }} → <span class="text-safe">{{ formatPeso(projectedBalance) }}</span>
+              </template>
+              <template v-else>{{ formatPeso(wallet.balance) }}</template>
+            </span>
             <span v-if="walletId === wallet.id" class="shrink-0 text-accent">✓</span>
           </button>
         </div>
@@ -164,16 +169,6 @@ async function handleSubmit() {
             />
           </span>
         </label>
-
-        <p v-if="selectedWallet" class="mt-2 flex items-center justify-between text-xs font-medium text-text-dim">
-          <span>{{ selectedWallet.label }} balance</span>
-          <span>
-            {{ formatPeso(selectedWallet.balance) }}
-            <template v-if="Number(amountStr) > 0">
-              → <span class="text-text">{{ formatPeso(projectedBalance) }}</span>
-            </template>
-          </span>
-        </p>
 
         <label v-if="!isEditing" class="mt-4 flex flex-col gap-1.5 text-sm font-semibold">
           Date
