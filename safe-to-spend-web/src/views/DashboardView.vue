@@ -96,7 +96,7 @@ const emptyMessage = computed(() => {
 </script>
 
 <template>
-  <LoadingState v-if="!dashboard.hasLoaded" label="Loading your dashboard..." />
+  <LoadingState v-if="!dashboard.hasLoaded" label="Loading your overview..." />
   <div v-else class="flex flex-col gap-6">
     <div>
       <p class="text-sm text-text-dim">

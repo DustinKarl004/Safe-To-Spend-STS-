@@ -192,7 +192,7 @@ async function confirmRemovePayday() {
 </script>
 
 <template>
-  <LoadingState v-if="!dashboard.hasLoaded" label="Loading your wallets..." />
+  <LoadingState v-if="!dashboard.hasLoaded" label="Loading your balance and wallets..." />
   <div v-else class="flex flex-col gap-6">
     <div>
       <h1 class="font-display text-2xl font-extrabold">Balance</h1>

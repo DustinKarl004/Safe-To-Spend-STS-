@@ -11,6 +11,7 @@ import MonthPicker from '@/components/MonthPicker.vue'
 import ExpenseLogSheet from '@/components/ExpenseLogSheet.vue'
 import IncomeLogSheet from '@/components/IncomeLogSheet.vue'
 import ConfirmModal from '@/components/ConfirmModal.vue'
+import LoadingState from '@/components/LoadingState.vue'
 
 const dashboard = useDashboardStore()
 
@@ -199,7 +200,8 @@ async function confirmDelete() {
 </script>
 
 <template>
-  <div class="flex flex-col gap-6">
+  <LoadingState v-if="!dashboard.hasLoaded" label="Loading your transactions..." />
+  <div v-else class="flex flex-col gap-6">
     <div class="flex items-center justify-between">
       <div>
         <h1 class="font-display text-2xl font-extrabold">Transactions</h1>
