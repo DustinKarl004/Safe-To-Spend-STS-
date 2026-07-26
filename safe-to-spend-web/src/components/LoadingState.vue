@@ -18,13 +18,17 @@ defineProps({
   align-items: center;
   justify-content: center;
   gap: 0.75rem;
+  width: 100%;
+  min-height: 50vh;
   padding: 2.5rem 1.5rem;
+  text-align: center;
   color: var(--text-dim);
 }
 
 .loading-spinner {
   width: 28px;
   height: 28px;
+  flex-shrink: 0;
   border-radius: 50%;
   border: 3px solid var(--border);
   border-top-color: var(--accent);
@@ -34,6 +38,18 @@ defineProps({
 .loading-label {
   font-size: 0.85rem;
   font-weight: 600;
+  max-width: 20rem;
+}
+
+@media (min-width: 640px) {
+  .loading-state {
+    min-height: 60vh;
+  }
+
+  .loading-spinner {
+    width: 32px;
+    height: 32px;
+  }
 }
 
 @keyframes loading-spin {
