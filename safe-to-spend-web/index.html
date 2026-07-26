@@ -8,6 +8,13 @@
     <meta name="color-scheme" content="light dark" />
     <meta name="description" content="Safe-to-Spend — know how much you can spend today without starving before payday." />
     <title>Safe-to-Spend</title>
+    <script>
+      (function () {
+        var saved = localStorage.getItem('sts_theme')
+        var theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        document.documentElement.setAttribute('data-theme', theme)
+      })()
+    </script>
   </head>
   <body>
     <div id="app"></div>

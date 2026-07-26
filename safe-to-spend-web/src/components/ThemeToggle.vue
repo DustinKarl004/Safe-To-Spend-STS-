@@ -14,12 +14,7 @@ function toggle() {
 }
 
 onMounted(() => {
-  const saved = localStorage.getItem('sts_theme')
-  if (saved) {
-    apply(saved)
-  } else {
-    isDark.value = window.matchMedia('(prefers-color-scheme: dark)').matches
-  }
+  isDark.value = document.documentElement.getAttribute('data-theme') === 'dark'
 })
 </script>
 
