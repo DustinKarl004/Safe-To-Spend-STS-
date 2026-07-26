@@ -45,12 +45,11 @@ async function saveWalletSelection(selected) {
 
   savingWalletSelection.value = true
   try {
-    for (const s of toAdd) {
-      await dashboard.addWallet({ kind: s.kind, label: s.name, balance: 0 })
-    }
-    for (const w of toRemove) {
-      await dashboard.deleteWallet(w.id)
-    }
+    await Promise.all([
+      ...toAdd.map((s) => dashboard.addWallet({ kind: s.kind, label: s.name, balance: 0 }, { silent: true })),
+      ...toRemove.map((w) => dashboard.deleteWallet(w.id, { silent: true })),
+    ])
+    await dashboard.refresh()
     addWalletOpen.value = false
   } catch {
     window.alert('Something went wrong saving your wallets. Please try again.')

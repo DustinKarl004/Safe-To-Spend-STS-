@@ -40,14 +40,15 @@ export const useDashboardStore = defineStore('dashboard', {
       }
     },
 
-    async addWallet(wallet) {
+    async addWallet(wallet, { silent = false } = {}) {
       await api.post('/api/wallets', wallet)
-      await this.refresh()
+      if (!silent) await this.refresh()
     },
 
     async updateWallet(id, patch) {
       await api.patch(`/api/wallets/${id}`, patch)
-      await Promise.all([this.refresh(), this.fetchWalletAdjustments()])
+      this.refresh()
+      this.fetchWalletAdjustments()
     },
 
     async fetchWalletAdjustments() {
@@ -55,9 +56,9 @@ export const useDashboardStore = defineStore('dashboard', {
       this.walletAdjustments = data
     },
 
-    async deleteWallet(id) {
+    async deleteWallet(id, { silent = false } = {}) {
       await api.delete(`/api/wallets/${id}`)
-      await this.refresh()
+      if (!silent) await this.refresh()
     },
 
     async fetchIncomes() {
