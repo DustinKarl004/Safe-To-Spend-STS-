@@ -10,7 +10,7 @@ const props = defineProps({
   wallets: { type: Array, default: () => [] },
   saving: { type: Boolean, default: false },
 })
-const emit = defineEmits(['close', 'save'])
+const emit = defineEmits(['close', 'save', 'remove-now'])
 
 const pending = reactive(new Set())
 const removalTarget = ref(null)
@@ -61,7 +61,12 @@ function toggle(name) {
 }
 
 function confirmRemoval() {
-  if (removalTarget.value) pending.delete(removalTarget.value)
+  const name = removalTarget.value
+  if (name) {
+    pending.delete(name)
+    const wallet = existingWallet(name)
+    if (wallet) emit('remove-now', [wallet.id])
+  }
   removalTarget.value = null
 }
 
@@ -79,7 +84,18 @@ function clearGroup(group) {
 }
 
 function confirmGroupRemoval() {
-  if (removalGroup.value) removalGroup.value.providers.forEach((p) => pending.delete(p.name))
+  const group = removalGroup.value
+  if (group) {
+    const ids = []
+    group.providers.forEach((p) => {
+      if (pending.has(p.name)) {
+        pending.delete(p.name)
+        const wallet = existingWallet(p.name)
+        if (wallet) ids.push(wallet.id)
+      }
+    })
+    if (ids.length) emit('remove-now', ids)
+  }
   removalGroup.value = null
 }
 
@@ -87,18 +103,32 @@ function cancelGroupRemoval() {
   removalGroup.value = null
 }
 
+function hasChanges() {
+  if (pending.size !== props.selectedNames.length) return true
+  return props.selectedNames.some((name) => !pending.has(name))
+}
+
 function finish() {
   if (props.saving) return
+  if (!hasChanges()) {
+    emit('close')
+    return
+  }
   const selected = WALLET_GROUPS.flatMap((group) =>
     group.providers.filter((p) => pending.has(p.name)).map((p) => ({ kind: group.kind, name: p.name })),
   )
   emit('save', selected)
 }
+
+function cancel() {
+  if (props.saving) return
+  emit('close')
+}
 </script>
 
 <template>
   <Transition name="fade">
-    <div v-if="open" class="fixed inset-0 z-30 bg-black/40" @click="finish" />
+    <div v-if="open" class="fixed inset-0 z-30 bg-black/40" @click="cancel" />
   </Transition>
 
   <Transition name="slide">
@@ -115,7 +145,7 @@ function finish() {
           class="flex h-8 w-8 items-center justify-center rounded-full text-text-dim hover:bg-bg-sunken hover:text-text disabled:opacity-60"
           aria-label="Close"
           :disabled="saving"
-          @click="finish"
+          @click="cancel"
         >
           ✕
         </button>

@@ -38,6 +38,16 @@ const removingWallet = ref(false)
 const savingWalletSelection = ref(false)
 const savingWalletBalance = ref(false)
 
+async function removeWalletsNow(ids) {
+  try {
+    await Promise.all(ids.map((id) => dashboard.deleteWallet(id, { silent: true })))
+    await dashboard.refresh()
+  } catch {
+    window.alert('Something went wrong removing that wallet. Please try again.')
+    await dashboard.refresh()
+  }
+}
+
 async function saveWalletSelection(selected) {
   const selectedNames = new Set(selected.map((s) => s.name))
   const toAdd = selected.filter((s) => !dashboard.wallets.some((w) => w.label === s.name))
@@ -310,6 +320,7 @@ async function confirmRemovePayday() {
       :saving="savingWalletSelection"
       @close="addWalletOpen = false"
       @save="saveWalletSelection"
+      @remove-now="removeWalletsNow"
     />
 
     <WalletEditSheet
