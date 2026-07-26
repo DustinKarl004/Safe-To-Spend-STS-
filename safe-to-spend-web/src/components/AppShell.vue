@@ -1,4 +1,5 @@
 <script setup>
+import { onMounted, onUnmounted } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import AppLogo from './AppLogo.vue'
 import ThemeToggle from './ThemeToggle.vue'
@@ -8,6 +9,9 @@ import { useAuthStore } from '@/stores/auth'
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+
+onMounted(() => console.log('[AppShell] mounted, route =', route.name))
+onUnmounted(() => console.log('[AppShell] unmounted, route =', route.name))
 
 const navItems = [
   { name: 'dashboard', label: 'Overview', icon: 'gauge' },
