@@ -11,6 +11,7 @@ function isToday(dateStr) {
 export const useDashboardStore = defineStore('dashboard', {
   state: () => ({
     loading: false,
+    hasLoaded: false,
     safeToSpendToday: 0,
     totalWalletBalance: 0,
     daysRemaining: 0,
@@ -37,6 +38,7 @@ export const useDashboardStore = defineStore('dashboard', {
         this.recentExpenses = data.recent_expenses
       } finally {
         this.loading = false
+        this.hasLoaded = true
       }
     },
 

@@ -7,6 +7,7 @@ import { expenseCategory } from '@/lib/expenseCategories'
 import CategoryIcon from '@/components/CategoryIcon.vue'
 import GaugeRing from '@/components/GaugeRing.vue'
 import DatePicker from '@/components/DatePicker.vue'
+import LoadingState from '@/components/LoadingState.vue'
 
 const dashboard = useDashboardStore()
 const auth = useAuthStore()
@@ -95,7 +96,8 @@ const emptyMessage = computed(() => {
 </script>
 
 <template>
-  <div class="flex flex-col gap-6">
+  <LoadingState v-if="!dashboard.hasLoaded" label="Loading your dashboard..." />
+  <div v-else class="flex flex-col gap-6">
     <div>
       <p class="text-sm text-text-dim">
         Hey{{ auth.user?.email ? ',' : '' }} <span class="font-semibold text-text">{{ auth.user?.email }}</span>

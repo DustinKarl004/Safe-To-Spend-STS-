@@ -12,6 +12,7 @@ import WalletEditSheet from '@/components/WalletEditSheet.vue'
 import PaydayEditSheet from '@/components/PaydayEditSheet.vue'
 import MonthPicker from '@/components/MonthPicker.vue'
 import ConfirmModal from '@/components/ConfirmModal.vue'
+import LoadingState from '@/components/LoadingState.vue'
 
 const dashboard = useDashboardStore()
 const auth = useAuthStore()
@@ -191,7 +192,8 @@ async function confirmRemovePayday() {
 </script>
 
 <template>
-  <div class="flex flex-col gap-6">
+  <LoadingState v-if="!dashboard.hasLoaded" label="Loading your wallets..." />
+  <div v-else class="flex flex-col gap-6">
     <div>
       <h1 class="font-display text-2xl font-extrabold">Balance</h1>
       <p class="mt-1 text-sm text-text-dim">Every wallet you've added, and how this month's money moved.</p>
