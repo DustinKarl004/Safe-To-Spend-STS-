@@ -59,8 +59,10 @@ router.beforeEach(async (to) => {
   if (auth.isAuthenticated && !auth.user) {
     try {
       await auth.fetchMe()
-    } catch {
-      auth.logout()
+    } catch (err) {
+      if (err.response?.status === 401) {
+        auth.logout()
+      }
     }
   }
 
