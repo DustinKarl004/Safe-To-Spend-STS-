@@ -138,17 +138,23 @@ function cancel() {
       role="dialog"
       aria-label="Choose a wallet or bank"
     >
-      <div class="flex items-center justify-between border-b border-border px-5 py-4">
-        <h2 class="font-display text-base font-bold">Add a wallet or bank</h2>
-        <button
-          type="button"
-          class="flex h-8 w-8 items-center justify-center rounded-full text-text-dim hover:bg-bg-sunken hover:text-text disabled:opacity-60"
-          aria-label="Close"
-          :disabled="saving"
-          @click="cancel"
-        >
-          ✕
-        </button>
+      <div class="border-b border-border px-5 py-4">
+        <div class="flex items-center justify-between">
+          <h2 class="font-display text-base font-bold">Add a wallet or bank</h2>
+          <button
+            type="button"
+            class="flex h-8 w-8 items-center justify-center rounded-full text-text-dim hover:bg-bg-sunken hover:text-text disabled:opacity-60"
+            aria-label="Close"
+            :disabled="saving"
+            @click="cancel"
+          >
+            ✕
+          </button>
+        </div>
+        <p class="mt-1.5 text-[11px] leading-relaxed text-text-dim">
+          Bank and e-wallet logos are the property of their respective owners.
+          Safe To Spend is not affiliated with or endorsed by these institutions.
+        </p>
       </div>
 
       <div class="flex-1 overflow-y-auto px-5 py-4">
