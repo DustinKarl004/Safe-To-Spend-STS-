@@ -1,16 +1,20 @@
 <script setup>
-import { reactive, watch } from 'vue'
+import { reactive, ref, watch } from 'vue'
 import { WALLET_GROUPS } from '@/lib/walletProviders'
 import ProviderIcon from './ProviderIcon.vue'
+import ConfirmModal from './ConfirmModal.vue'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
   selectedNames: { type: Array, default: () => [] },
+  wallets: { type: Array, default: () => [] },
   saving: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close', 'save'])
 
 const pending = reactive(new Set())
+const removalTarget = ref(null)
+const removalGroup = ref(null)
 
 watch(
   () => props.open,
@@ -18,6 +22,8 @@ watch(
     if (isOpen) {
       pending.clear()
       props.selectedNames.forEach((name) => pending.add(name))
+      removalTarget.value = null
+      removalGroup.value = null
     }
   },
 )
@@ -30,16 +36,55 @@ function hasSelection(group) {
   return group.providers.some((p) => isSelected(p.name))
 }
 
+function existingWallet(name) {
+  return props.wallets.find((w) => w.label === name) || null
+}
+
+function walletBalance(name) {
+  return existingWallet(name)?.balance ? Number(existingWallet(name).balance) : 0
+}
+
+function formatPeso(value) {
+  return `₱${Number(value || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
 function toggle(name) {
   if (pending.has(name)) {
+    if (walletBalance(name) !== 0) {
+      removalTarget.value = name
+      return
+    }
     pending.delete(name)
   } else {
     pending.add(name)
   }
 }
 
+function confirmRemoval() {
+  if (removalTarget.value) pending.delete(removalTarget.value)
+  removalTarget.value = null
+}
+
+function cancelRemoval() {
+  removalTarget.value = null
+}
+
 function clearGroup(group) {
+  const withBalance = group.providers.find((p) => pending.has(p.name) && walletBalance(p.name) !== 0)
+  if (withBalance) {
+    removalGroup.value = group
+    return
+  }
   group.providers.forEach((p) => pending.delete(p.name))
+}
+
+function confirmGroupRemoval() {
+  if (removalGroup.value) removalGroup.value.providers.forEach((p) => pending.delete(p.name))
+  removalGroup.value = null
+}
+
+function cancelGroupRemoval() {
+  removalGroup.value = null
 }
 
 function finish() {
@@ -109,6 +154,9 @@ function finish() {
               <span v-if="isSelected(provider.name)" class="absolute right-2 top-2 text-accent">✓</span>
               <ProviderIcon v-bind="provider" :size="64" />
               <span class="leading-tight">{{ provider.name }}</span>
+              <span v-if="existingWallet(provider.name)" class="text-xs font-semibold text-text-dim">
+                {{ formatPeso(existingWallet(provider.name).balance) }}
+              </span>
             </button>
           </div>
         </div>
@@ -126,6 +174,22 @@ function finish() {
       </div>
     </aside>
   </Transition>
+
+  <ConfirmModal
+    :open="Boolean(removalTarget)"
+    title="Remove this wallet?"
+    :message="`This will permanently delete ${removalTarget}, its current balance of ${formatPeso(walletBalance(removalTarget))}, and all its income and expense entries. This cannot be undone.`"
+    @cancel="cancelRemoval"
+    @confirm="confirmRemoval"
+  />
+
+  <ConfirmModal
+    :open="Boolean(removalGroup)"
+    title="Remove these wallets?"
+    :message="`Some wallets in ${removalGroup?.label ?? 'this group'} still have a balance. Removing them will permanently delete their balances and all their income and expense entries. This cannot be undone.`"
+    @cancel="cancelGroupRemoval"
+    @confirm="confirmGroupRemoval"
+  />
 </template>
 
 <style scoped>

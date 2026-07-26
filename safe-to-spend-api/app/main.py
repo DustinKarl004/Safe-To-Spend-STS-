@@ -9,7 +9,7 @@ import qrcode.image.svg
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import inspect, select, text, update
+from sqlalchemy import delete, inspect, select, text, update
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -292,9 +292,9 @@ def update_wallet(
 def delete_wallet(wallet_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     wallet = _get_owned_wallet(wallet_id, current_user, db)
 
-    db.execute(update(Expense).where(Expense.wallet_id == wallet.id).values(wallet_id=None))
-    db.execute(update(Income).where(Income.wallet_id == wallet.id).values(wallet_id=None))
-    db.execute(update(WalletAdjustment).where(WalletAdjustment.wallet_id == wallet.id).values(wallet_id=None))
+    db.execute(delete(Expense).where(Expense.wallet_id == wallet.id))
+    db.execute(delete(Income).where(Income.wallet_id == wallet.id))
+    db.execute(delete(WalletAdjustment).where(WalletAdjustment.wallet_id == wallet.id))
     if current_user.payday_wallet_id == wallet.id:
         current_user.payday_wallet_id = None
 

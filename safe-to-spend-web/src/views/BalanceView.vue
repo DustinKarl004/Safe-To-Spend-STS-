@@ -306,6 +306,7 @@ async function confirmRemovePayday() {
     <WalletPickerDrawer
       :open="addWalletOpen"
       :selected-names="dashboard.wallets.map((w) => w.label)"
+      :wallets="dashboard.wallets"
       :saving="savingWalletSelection"
       @close="addWalletOpen = false"
       @save="saveWalletSelection"
@@ -323,7 +324,7 @@ async function confirmRemovePayday() {
     <ConfirmModal
       :open="confirmingWalletRemove"
       title="Remove this wallet?"
-      :message="`This will remove ${editingWallet?.label ?? 'this wallet'} from your list. Its expense and income history will be kept, just unlinked.`"
+      :message="`This will permanently delete ${editingWallet?.label ?? 'this wallet'}, its current balance of ₱${money(editingWallet?.balance ?? 0)}, and all its income and expense entries. This cannot be undone.`"
       :busy="removingWallet"
       @cancel="cancelRemoveWallet"
       @confirm="confirmRemoveWallet"
