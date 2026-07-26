@@ -58,6 +58,15 @@
   color-scheme: dark;
 }
 
+#app-splash {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+
 @theme {
   --color-bg: var(--bg);
   --color-bg-raised: var(--bg-raised);

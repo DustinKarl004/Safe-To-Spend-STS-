@@ -10,7 +10,29 @@
     <title>Safe-to-Spend</title>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div id="app-splash">
+        <svg width="40" height="40" viewBox="0 0 88 88" aria-hidden="true">
+          <circle cx="44" cy="44" r="34" fill="none" stroke="var(--bg-sunken)" stroke-width="8" />
+          <path
+            d="M 68.8 63.7 A 34 34 0 1 1 68.8 24.3"
+            fill="none"
+            stroke="var(--accent)"
+            stroke-width="8"
+            stroke-linecap="round"
+          >
+            <animateTransform
+              attributeName="transform"
+              type="rotate"
+              from="0 44 44"
+              to="360 44 44"
+              dur="0.9s"
+              repeatCount="indefinite"
+            />
+          </path>
+        </svg>
+      </div>
+    </div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
