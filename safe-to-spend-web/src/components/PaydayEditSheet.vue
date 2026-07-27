@@ -6,22 +6,29 @@ import ProviderIcon from './ProviderIcon.vue'
 import CategoryIcon from './CategoryIcon.vue'
 import DatePicker from './DatePicker.vue'
 
+const RECURRENCE_OPTIONS = [
+  { value: 'one_time', label: 'One-time' },
+  { value: 'weekly', label: 'Weekly' },
+  { value: 'biweekly', label: 'Biweekly' },
+  { value: 'semi_monthly', label: 'Semi-monthly' },
+  { value: 'monthly', label: 'Monthly' },
+]
+
 const props = defineProps({
   open: { type: Boolean, default: false },
   wallets: { type: Array, default: () => [] },
   todayIso: { type: String, required: true },
-  initialDate: { type: String, default: '' },
-  initialCategory: { type: String, default: 'salary' },
-  initialWalletId: { type: Number, default: null },
-  initialAmount: { type: Number, default: null },
-  initialNote: { type: String, default: '' },
-  hasExpectedInfo: { type: Boolean, default: false },
+  source: { type: Object, default: null },
   saving: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close', 'save', 'remove'])
 
+const isEditing = computed(() => Boolean(props.source))
+
+const label = ref('')
 const date = ref('')
 const category = ref('salary')
+const recurrence = ref('one_time')
 const walletId = ref(null)
 const amountStr = ref('')
 const note = ref('')
@@ -30,22 +37,26 @@ watch(
   () => props.open,
   (isOpen) => {
     if (isOpen) {
-      date.value = props.initialDate || props.todayIso
-      category.value = props.initialCategory
-      walletId.value = props.initialWalletId ?? props.wallets[0]?.id ?? null
-      amountStr.value = props.initialAmount ? String(props.initialAmount) : ''
-      note.value = props.initialNote || ''
+      label.value = props.source?.label || ''
+      date.value = props.source?.next_date || props.todayIso
+      category.value = props.source?.category || 'salary'
+      recurrence.value = props.source?.recurrence || 'one_time'
+      walletId.value = props.source?.wallet_id ?? props.wallets[0]?.id ?? null
+      amountStr.value = props.source?.amount ? String(props.source.amount) : ''
+      note.value = props.source?.note || ''
     }
   },
 )
 
-const canSave = computed(() => Boolean(date.value) && Number(amountStr.value) > 0 && walletId.value)
+const canSave = computed(() => Boolean(date.value))
 
 function handleSave() {
   if (!canSave.value || props.saving) return
   emit('save', {
-    next_payday: date.value,
+    label: label.value.trim() || null,
+    next_date: date.value,
     category: category.value,
+    recurrence: recurrence.value,
     wallet_id: walletId.value,
     amount: amountStr.value === '' ? null : Number(amountStr.value),
     note: note.value.trim() || null,
@@ -67,10 +78,10 @@ function handleRemove() {
       v-if="open"
       class="fixed inset-y-0 right-0 z-40 flex w-full max-w-sm flex-col bg-bg-raised shadow-2xl sm:max-w-md"
       role="dialog"
-      aria-label="Edit payday"
+      aria-label="Edit payday source"
     >
       <div class="flex items-center justify-between border-b border-border px-5 py-4">
-        <h2 class="font-display text-base font-bold">Payday</h2>
+        <h2 class="font-display text-base font-bold">{{ isEditing ? 'Edit payday source' : 'Add payday source' }}</h2>
         <button
           type="button"
           class="flex h-8 w-8 items-center justify-center rounded-full text-text-dim hover:bg-bg-sunken hover:text-text"
@@ -82,7 +93,18 @@ function handleRemove() {
       </div>
 
       <div class="flex-1 overflow-y-auto px-5 py-4">
-        <h3 class="mb-2.5 text-xs font-semibold uppercase tracking-wide text-text-dim">Category</h3>
+        <label class="flex flex-col gap-1.5 text-sm font-semibold">
+          Label
+          <input
+            v-model="label"
+            type="text"
+            maxlength="50"
+            placeholder="e.g. Allowance, TikTok affiliate"
+            class="rounded-xl border border-border bg-bg-sunken px-3.5 py-2.5 text-sm font-normal outline-none focus:border-accent"
+          />
+        </label>
+
+        <h3 class="mb-2.5 mt-5 text-xs font-semibold uppercase tracking-wide text-text-dim">Category</h3>
         <div class="grid grid-cols-4 gap-2">
           <button
             v-for="cat in INCOME_CATEGORIES"
@@ -94,6 +116,20 @@ function handleRemove() {
           >
             <CategoryIcon :icon="cat.icon" :color="cat.color" :size="34" />
             <span class="text-[11px] font-semibold leading-tight">{{ cat.label }}</span>
+          </button>
+        </div>
+
+        <h3 class="mb-2.5 mt-5 text-xs font-semibold uppercase tracking-wide text-text-dim">Repeats</h3>
+        <div class="flex flex-wrap gap-2">
+          <button
+            v-for="opt in RECURRENCE_OPTIONS"
+            :key="opt.value"
+            type="button"
+            class="rounded-full border px-3.5 py-2 text-xs font-semibold transition"
+            :class="recurrence === opt.value ? 'border-accent bg-accent/10 text-accent' : 'border-border bg-bg-sunken hover:border-accent/50'"
+            @click="recurrence = opt.value"
+          >
+            {{ opt.label }}
           </button>
         </div>
 
@@ -114,7 +150,7 @@ function handleRemove() {
         </div>
 
         <label class="mt-5 flex flex-col gap-1.5 text-sm font-semibold">
-          Amount
+          Expected amount (optional)
           <span class="relative flex items-center">
             <span class="pointer-events-none absolute left-3.5 text-text-dim">₱</span>
             <input
@@ -130,7 +166,7 @@ function handleRemove() {
 
         <label class="mt-4 flex flex-col gap-1.5 text-sm font-semibold">
           Date
-          <DatePicker v-model="date" :min="todayIso" placeholder="Select your payday" />
+          <DatePicker v-model="date" :min="todayIso" placeholder="Select the payday" />
         </label>
 
         <label class="mt-4 flex flex-col gap-1.5 text-sm font-semibold">
@@ -147,13 +183,13 @@ function handleRemove() {
 
       <div class="flex gap-3 border-t border-border px-5 py-4">
         <button
-          v-if="hasExpectedInfo"
+          v-if="isEditing"
           type="button"
           :disabled="saving"
           class="rounded-xl border border-border px-4 py-3 text-sm font-bold text-danger disabled:opacity-40"
           @click="handleRemove"
         >
-          Delete payday
+          Delete
         </button>
         <button
           type="button"

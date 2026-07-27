@@ -3,6 +3,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 INCOME_CATEGORY_PATTERN = "^(salary|interest|investment|cashback|allowance|bonus|other)$"
+RECURRENCE_PATTERN = "^(one_time|weekly|biweekly|monthly|semi_monthly)$"
 
 
 # ---- auth ----
@@ -56,21 +57,41 @@ class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     email: EmailStr
-    next_payday: date | None = None
-    payday_amount: float | None = None
-    payday_wallet_id: int | None = None
-    payday_category: str | None = None
-    payday_note: str | None = None
     totp_enabled: bool = False
 
 
-# ---- payday ----
-class PaydayUpdate(BaseModel):
-    next_payday: date | None = None
-    amount: float | None = Field(default=None, ge=0)
+# ---- payday sources ----
+class PaydaySourceCreate(BaseModel):
+    label: str | None = Field(default=None, max_length=50)
     wallet_id: int | None = None
-    category: str | None = Field(default=None, pattern=INCOME_CATEGORY_PATTERN)
+    amount: float | None = Field(default=None, ge=0)
+    category: str = Field(pattern=INCOME_CATEGORY_PATTERN)
+    recurrence: str = Field(default="one_time", pattern=RECURRENCE_PATTERN)
+    next_date: date
     note: str | None = Field(default=None, max_length=140)
+
+
+class PaydaySourceUpdate(BaseModel):
+    label: str | None = Field(default=None, max_length=50)
+    wallet_id: int | None = None
+    amount: float | None = Field(default=None, ge=0)
+    category: str | None = Field(default=None, pattern=INCOME_CATEGORY_PATTERN)
+    recurrence: str | None = Field(default=None, pattern=RECURRENCE_PATTERN)
+    next_date: date | None = None
+    note: str | None = Field(default=None, max_length=140)
+
+
+class PaydaySourceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    label: str | None
+    wallet_id: int | None
+    wallet_label: str | None
+    amount: float | None
+    category: str
+    recurrence: str
+    next_date: date
+    note: str | None
 
 
 # ---- wallets ----
@@ -142,6 +163,7 @@ class ExpenseCreate(BaseModel):
     category: str = Field(pattern=CATEGORY_PATTERN)
     note: str | None = Field(default=None, max_length=140)
     entry_date: date | None = None
+    is_need: bool = False
 
 
 class ExpenseUpdate(BaseModel):
@@ -149,6 +171,7 @@ class ExpenseUpdate(BaseModel):
     amount: float | None = Field(default=None, gt=0)
     category: str | None = Field(default=None, pattern=CATEGORY_PATTERN)
     note: str | None = Field(default=None, max_length=140)
+    is_need: bool | None = None
 
 
 class ExpenseOut(BaseModel):
@@ -159,6 +182,7 @@ class ExpenseOut(BaseModel):
     amount: float
     category: str
     note: str | None
+    is_need: bool
     created_at: datetime
 
 
@@ -171,3 +195,4 @@ class DashboardOut(BaseModel):
     spent_today: float
     wallets: list[WalletOut]
     recent_expenses: list[ExpenseOut]
+    upcoming_paydays: list[PaydaySourceOut]

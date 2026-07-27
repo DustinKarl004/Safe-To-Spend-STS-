@@ -22,6 +22,7 @@ export const useDashboardStore = defineStore('dashboard', {
     allExpenses: [],
     walletAdjustments: [],
     incomes: [],
+    paydaySources: [],
   }),
 
   actions: {
@@ -36,6 +37,7 @@ export const useDashboardStore = defineStore('dashboard', {
         this.spentToday = data.spent_today
         this.wallets = data.wallets
         this.recentExpenses = data.recent_expenses
+        this.paydaySources = data.upcoming_paydays
       } finally {
         this.loading = false
         this.hasLoaded = true
@@ -61,6 +63,34 @@ export const useDashboardStore = defineStore('dashboard', {
     async deleteWallet(id, { silent = false } = {}) {
       await api.delete(`/api/wallets/${id}`)
       if (!silent) await this.refresh()
+    },
+
+    async fetchPaydaySources() {
+      const { data } = await api.get('/api/payday-sources')
+      this.paydaySources = data
+    },
+
+    async addPaydaySource(source) {
+      const { data } = await api.post('/api/payday-sources', source)
+      this.paydaySources.push(data)
+      this.paydaySources.sort((a, b) => a.next_date.localeCompare(b.next_date))
+      this.refresh()
+      return data
+    },
+
+    async updatePaydaySource(id, patch) {
+      const { data } = await api.patch(`/api/payday-sources/${id}`, patch)
+      const idx = this.paydaySources.findIndex((s) => s.id === id)
+      if (idx !== -1) this.paydaySources[idx] = data
+      this.paydaySources.sort((a, b) => a.next_date.localeCompare(b.next_date))
+      this.refresh()
+      return data
+    },
+
+    async deletePaydaySource(id) {
+      await api.delete(`/api/payday-sources/${id}`)
+      this.paydaySources = this.paydaySources.filter((s) => s.id !== id)
+      this.refresh()
     },
 
     async fetchIncomes() {
@@ -137,7 +167,7 @@ export const useDashboardStore = defineStore('dashboard', {
       const amount = Number(expense.amount)
       if (wallet) wallet.balance = Number(wallet.balance) - amount
       this.totalWalletBalance -= amount
-      if (isToday(expense.entry_date)) {
+      if (!expense.is_need && isToday(expense.entry_date)) {
         this.spentToday += amount
         this.safeToSpendToday -= amount
       }
@@ -194,7 +224,7 @@ export const useDashboardStore = defineStore('dashboard', {
         const wallet = this.wallets.find((w) => w.id === expense.wallet_id)
         if (wallet) wallet.balance = Number(wallet.balance) + amount
         this.totalWalletBalance += amount
-        if (isToday(expense.created_at?.slice(0, 10))) {
+        if (!expense.is_need && isToday(expense.created_at?.slice(0, 10))) {
           this.spentToday -= amount
           this.safeToSpendToday += amount
         }

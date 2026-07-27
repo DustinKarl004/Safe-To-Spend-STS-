@@ -15,6 +15,8 @@ const props = defineProps({
 })
 const emit = defineEmits(['close', 'submit'])
 
+const NEEDS_CATEGORIES = ['bills', 'home', 'education', 'tithes', 'health', 'groceries']
+
 function pad(n) {
   return String(n).padStart(2, '0')
 }
@@ -28,6 +30,7 @@ const walletId = ref(null)
 const amountStr = ref('')
 const entryDate = ref(todayIso)
 const note = ref('')
+const isNeed = ref(false)
 const submitting = ref(false)
 const error = ref('')
 
@@ -40,17 +43,26 @@ watch(
         walletId.value = props.expense.wallet_id ?? props.wallets[0]?.id ?? null
         amountStr.value = String(props.expense.amount)
         note.value = props.expense.note || ''
+        isNeed.value = Boolean(props.expense.is_need)
       } else {
         category.value = props.defaultCategory
         walletId.value = props.defaultWalletId ?? props.wallets[0]?.id ?? null
         amountStr.value = ''
         note.value = ''
+        isNeed.value = false
       }
       entryDate.value = todayIso
       error.value = ''
     }
   },
 )
+
+const isNeedEligible = computed(() => NEEDS_CATEGORIES.includes(category.value))
+
+function selectCategory(value) {
+  category.value = value
+  isNeed.value = NEEDS_CATEGORIES.includes(value)
+}
 
 const canSubmit = computed(() => Number(amountStr.value) > 0 && walletId.value)
 
@@ -78,6 +90,7 @@ async function handleSubmit() {
       amount: Number(amountStr.value),
       category: category.value,
       note: note.value.trim() || null,
+      is_need: isNeed.value,
     }
     if (!isEditing.value) payload.entry_date = entryDate.value
     await emit('submit', payload)
@@ -123,7 +136,7 @@ async function handleSubmit() {
               type="button"
               class="flex flex-col items-center gap-1.5 rounded-xl border p-2 text-center transition"
               :class="category === cat.value ? 'border-accent bg-accent/10' : 'border-border bg-bg-sunken hover:border-accent/50'"
-              @click="category = cat.value"
+              @click="selectCategory(cat.value)"
             >
               <CategoryIcon :icon="cat.icon" :color="cat.color" :size="34" />
               <span class="text-[11px] font-semibold leading-tight">{{ cat.label }}</span>
@@ -185,6 +198,28 @@ async function handleSubmit() {
             placeholder="e.g. Jeepney fare"
             class="rounded-xl border border-border bg-bg-sunken px-3.5 py-2.5 text-sm font-normal outline-none focus:border-accent"
           />
+        </label>
+
+        <label v-if="isNeedEligible" class="mt-4 flex items-start gap-3 rounded-xl bg-bg-sunken p-3.5">
+          <button
+            type="button"
+            role="switch"
+            :aria-checked="isNeed"
+            class="relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition"
+            :class="isNeed ? 'bg-accent' : 'bg-border'"
+            @click="isNeed = !isNeed"
+          >
+            <span
+              class="absolute top-0.5 h-4 w-4 rounded-full bg-white transition"
+              :class="isNeed ? 'left-[18px]' : 'left-0.5'"
+            />
+          </button>
+          <span class="text-sm">
+            <span class="font-semibold">This is a need or bill, not daily spend</span>
+            <span class="mt-0.5 block text-xs text-text-dim">
+              For rent, utilities, gas, tuition, etc. — it still leaves your wallet, but never counts against your safe-to-spend today.
+            </span>
+          </span>
         </label>
 
         <p v-if="error" class="mt-3 text-sm font-medium text-danger">{{ error }}</p>

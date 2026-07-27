@@ -6,7 +6,7 @@ from sqlalchemy import pool
 from alembic import context
 
 from app.database import Base, database_url
-from app.models import Expense, Income, User, Wallet, WalletAdjustment  # noqa: F401
+from app.models import Expense, Income, PaydaySource, User, Wallet, WalletAdjustment  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

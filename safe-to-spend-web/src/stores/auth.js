@@ -9,7 +9,6 @@ export const useAuthStore = defineStore('auth', {
 
   getters: {
     isAuthenticated: (state) => Boolean(state.token),
-    hasPayday: (state) => Boolean(state.user?.next_payday),
   },
 
   actions: {
@@ -46,13 +45,6 @@ export const useAuthStore = defineStore('auth', {
 
     async fetchMe() {
       const { data } = await api.get('/api/auth/me')
-      this.user = data
-      return data
-    },
-
-    async setPayday(payload) {
-      const body = typeof payload === 'string' ? { next_payday: payload } : payload
-      const { data } = await api.put('/api/payday', body)
       this.user = data
       return data
     },

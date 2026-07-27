@@ -2,7 +2,6 @@
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useDashboardStore } from '@/stores/dashboard'
-import { useAuthStore } from '@/stores/auth'
 import { KIND_LABEL, providerIcon } from '@/lib/walletProviders'
 import { incomeCategory } from '@/lib/incomeCategories'
 import ProviderIcon from '@/components/ProviderIcon.vue'
@@ -15,13 +14,13 @@ import ConfirmModal from '@/components/ConfirmModal.vue'
 import LoadingState from '@/components/LoadingState.vue'
 
 const dashboard = useDashboardStore()
-const auth = useAuthStore()
 
 onMounted(() => {
   dashboard.refresh()
   dashboard.fetchAllExpenses()
   dashboard.fetchWalletAdjustments()
   dashboard.fetchIncomes()
+  dashboard.fetchPaydaySources()
 })
 
 function money(n) {
@@ -133,60 +132,77 @@ const monthLabel = computed(() =>
 )
 const isNetPositive = computed(() => netThisMonth.value >= 0)
 
-// ---- payday ----
+// ---- payday sources ----
 const todayIso = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`
-const editingPayday = ref(false)
+const editingPaydaySource = ref(null)
+const addingPaydaySource = ref(false)
 
-const paydayLabel = computed(() => {
-  if (!auth.user?.next_payday) return null
-  return new Date(auth.user.next_payday).toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })
-})
+function daysUntil(dateStr) {
+  return Math.ceil((new Date(dateStr) - new Date(todayIso)) / (1000 * 60 * 60 * 24))
+}
 
-const daysUntilPayday = computed(() => {
-  if (!auth.user?.next_payday) return null
-  return Math.ceil((new Date(auth.user.next_payday) - new Date(todayIso)) / (1000 * 60 * 60 * 24))
-})
+function paydaySourceWallet(source) {
+  return dashboard.wallets.find((w) => w.id === source.wallet_id) || null
+}
 
-const paydayWallet = computed(() => dashboard.wallets.find((w) => w.id === auth.user?.payday_wallet_id) || null)
-const paydayCategoryInfo = computed(() => incomeCategory(auth.user?.payday_category || 'salary'))
-const hasExpectedInfo = computed(() =>
-  Boolean(auth.user?.next_payday || auth.user?.payday_amount || auth.user?.payday_wallet_id),
-)
+function paydaySourceCategoryInfo(source) {
+  return incomeCategory(source.category || 'salary')
+}
 
-const savingPayday = ref(false)
-const confirmingPaydayRemove = ref(false)
-const removingPayday = ref(false)
+const savingPaydaySource = ref(false)
+const confirmingPaydaySourceRemove = ref(null)
+const removingPaydaySource = ref(false)
 
-async function savePayday(payload) {
-  savingPayday.value = true
+function openAddPaydaySource() {
+  editingPaydaySource.value = null
+  addingPaydaySource.value = true
+}
+
+function openEditPaydaySource(source) {
+  editingPaydaySource.value = source
+  addingPaydaySource.value = true
+}
+
+function closePaydaySourceSheet() {
+  addingPaydaySource.value = false
+  editingPaydaySource.value = null
+}
+
+async function savePaydaySource(payload) {
+  savingPaydaySource.value = true
   try {
-    await auth.setPayday(payload)
-    editingPayday.value = false
+    if (editingPaydaySource.value) {
+      await dashboard.updatePaydaySource(editingPaydaySource.value.id, payload)
+    } else {
+      await dashboard.addPaydaySource(payload)
+    }
+    closePaydaySourceSheet()
   } catch {
-    window.alert('Something went wrong saving your payday. Please try again.')
+    window.alert('Something went wrong saving that payday source. Please try again.')
   } finally {
-    savingPayday.value = false
+    savingPaydaySource.value = false
   }
 }
 
-function askRemovePayday() {
-  confirmingPaydayRemove.value = true
+function askRemovePaydaySource() {
+  confirmingPaydaySourceRemove.value = editingPaydaySource.value
 }
 
-function cancelRemovePayday() {
-  confirmingPaydayRemove.value = false
+function cancelRemovePaydaySource() {
+  confirmingPaydaySourceRemove.value = null
 }
 
-async function confirmRemovePayday() {
-  removingPayday.value = true
+async function confirmRemovePaydaySource() {
+  if (!confirmingPaydaySourceRemove.value) return
+  removingPaydaySource.value = true
   try {
-    await auth.setPayday({ next_payday: null, amount: null, wallet_id: null, category: null, note: null })
-    confirmingPaydayRemove.value = false
-    editingPayday.value = false
+    await dashboard.deletePaydaySource(confirmingPaydaySourceRemove.value.id)
+    confirmingPaydaySourceRemove.value = null
+    closePaydaySourceSheet()
   } catch {
-    window.alert('Something went wrong removing your payday info. Please try again.')
+    window.alert('Something went wrong removing that payday source. Please try again.')
   } finally {
-    removingPayday.value = false
+    removingPaydaySource.value = false
   }
 }
 </script>
@@ -226,50 +242,49 @@ async function confirmRemovePayday() {
     <!-- Payday -->
     <div class="rounded-2xl border border-border bg-bg-raised p-6 shadow-sm">
       <div class="flex items-center justify-between">
-        <h2 class="font-display text-base font-bold">Payday</h2>
+        <h2 class="font-display text-base font-bold">Payday sources</h2>
         <button
           type="button"
           class="text-sm font-semibold text-accent"
-          @click="editingPayday = true"
+          @click="openAddPaydaySource"
         >
-          Edit
+          Add
         </button>
       </div>
 
-      <div v-if="paydayLabel" class="mt-3 flex flex-col gap-3">
-        <div class="flex items-center justify-between">
-          <p class="font-display text-2xl font-extrabold tabular-nums tracking-tight">{{ paydayLabel }}</p>
-          <span
-            class="shrink-0 rounded-full px-3 py-1 text-xs font-semibold"
-            style="background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent)"
-          >
-            {{ daysUntilPayday }}d away
-          </span>
-        </div>
-
-        <div class="flex items-center gap-3 rounded-xl bg-bg-sunken p-3">
-          <CategoryIcon :icon="paydayCategoryInfo.icon" :color="paydayCategoryInfo.color" :size="36" />
-          <div class="min-w-0 flex-1">
-            <p class="text-xs text-text-dim">Expected amount</p>
-            <p class="truncate text-sm font-bold" :class="auth.user?.payday_amount ? 'text-text' : 'text-text-dim'">
-              {{ auth.user?.payday_amount ? `₱${money(auth.user.payday_amount)}` : 'None' }}
-            </p>
+      <div v-if="dashboard.paydaySources.length" class="mt-3 flex flex-col gap-3">
+        <button
+          v-for="source in dashboard.paydaySources"
+          :key="source.id"
+          type="button"
+          class="w-full rounded-xl bg-bg-sunken p-3 text-left transition hover:brightness-110"
+          @click="openEditPaydaySource(source)"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex min-w-0 items-center gap-3">
+              <CategoryIcon :icon="paydaySourceCategoryInfo(source).icon" :color="paydaySourceCategoryInfo(source).color" :size="36" />
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-bold">{{ source.label || paydaySourceCategoryInfo(source).label }}</p>
+                <p class="text-xs text-text-dim">
+                  {{ new Date(source.next_date).toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' }) }}
+                  <span v-if="source.wallet_label"> · {{ source.wallet_label }}</span>
+                </p>
+              </div>
+            </div>
+            <div class="flex shrink-0 flex-col items-end gap-1">
+              <span
+                class="rounded-full px-3 py-1 text-xs font-semibold"
+                style="background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent)"
+              >
+                {{ daysUntil(source.next_date) }}d away
+              </span>
+              <span v-if="source.amount" class="text-xs font-semibold text-text-dim">₱{{ money(source.amount) }}</span>
+            </div>
           </div>
-        </div>
-
-        <div class="flex items-center gap-3 rounded-xl bg-bg-sunken p-3">
-          <ProviderIcon v-if="paydayWallet" v-bind="providerIcon(paydayWallet.label)" :size="36" />
-          <span v-else class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-bg-raised text-text-dim">—</span>
-          <div class="min-w-0 flex-1">
-            <p class="text-xs text-text-dim">Goes to</p>
-            <p class="truncate text-sm font-bold" :class="paydayWallet ? 'text-text' : 'text-text-dim'">
-              {{ paydayWallet ? paydayWallet.label : 'None' }}
-            </p>
-          </div>
-        </div>
+        </button>
       </div>
 
-      <p v-else class="mt-3 text-sm text-text-dim">No payday set yet.</p>
+      <p v-else class="mt-3 text-sm text-text-dim">No payday sources set yet — add your allowance, sideline, or any other income.</p>
     </div>
 
     <RouterLink
@@ -344,28 +359,23 @@ async function confirmRemovePayday() {
     />
 
     <PaydayEditSheet
-      :open="editingPayday"
+      :open="addingPaydaySource"
       :wallets="dashboard.wallets"
       :today-iso="todayIso"
-      :initial-date="auth.user?.next_payday || todayIso"
-      :initial-category="auth.user?.payday_category || 'salary'"
-      :initial-wallet-id="auth.user?.payday_wallet_id ?? null"
-      :initial-amount="auth.user?.payday_amount ?? null"
-      :initial-note="auth.user?.payday_note || ''"
-      :has-expected-info="hasExpectedInfo"
-      :saving="savingPayday"
-      @close="editingPayday = false"
-      @save="savePayday"
-      @remove="askRemovePayday"
+      :source="editingPaydaySource"
+      :saving="savingPaydaySource"
+      @close="closePaydaySourceSheet"
+      @save="savePaydaySource"
+      @remove="askRemovePaydaySource"
     />
 
     <ConfirmModal
-      :open="confirmingPaydayRemove"
-      title="Remove your payday?"
-      message="This will clear your payday date, expected amount, and wallet. You can set it up again anytime."
-      :busy="removingPayday"
-      @cancel="cancelRemovePayday"
-      @confirm="confirmRemovePayday"
+      :open="Boolean(confirmingPaydaySourceRemove)"
+      title="Remove this payday source?"
+      :message="`This will delete ${confirmingPaydaySourceRemove?.label || 'this payday source'}. You can add it again anytime.`"
+      :busy="removingPaydaySource"
+      @cancel="cancelRemovePaydaySource"
+      @confirm="confirmRemovePaydaySource"
     />
   </div>
 </template>

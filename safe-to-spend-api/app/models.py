@@ -16,11 +16,6 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255))
-    next_payday: Mapped[date | None] = mapped_column(Date, nullable=True)
-    payday_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
-    payday_wallet_id: Mapped[int | None] = mapped_column(ForeignKey("wallets.id"), nullable=True)
-    payday_category: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    payday_note: Mapped[str | None] = mapped_column(String(140), nullable=True)
     totp_secret: Mapped[str | None] = mapped_column(String(32), nullable=True)
     totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
@@ -33,6 +28,7 @@ class User(Base):
         back_populates="owner", cascade="all, delete-orphan"
     )
     incomes: Mapped[list["Income"]] = relationship(back_populates="owner", cascade="all, delete-orphan")
+    payday_sources: Mapped[list["PaydaySource"]] = relationship(back_populates="owner", cascade="all, delete-orphan")
 
 
 class Wallet(Base):
@@ -75,6 +71,24 @@ class Income(Base):
     owner: Mapped["User"] = relationship(back_populates="incomes")
 
 
+class PaydaySource(Base):
+    __tablename__ = "payday_sources"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    wallet_id: Mapped[int | None] = mapped_column(ForeignKey("wallets.id"), nullable=True)
+    wallet_label: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    label: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    category: Mapped[str] = mapped_column(String(20))  # see INCOME_CATEGORY_PATTERN in schemas.py
+    recurrence: Mapped[str] = mapped_column(String(20), default="one_time")  # one_time|weekly|biweekly|monthly|semi_monthly
+    next_date: Mapped[date] = mapped_column(Date)
+    note: Mapped[str | None] = mapped_column(String(140), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    owner: Mapped["User"] = relationship(back_populates="payday_sources")
+
+
 class Expense(Base):
     __tablename__ = "expenses"
 
@@ -85,6 +99,7 @@ class Expense(Base):
     amount: Mapped[float] = mapped_column(Numeric(12, 2))
     category: Mapped[str] = mapped_column(String(20))  # see CATEGORY_PATTERN in schemas.py
     note: Mapped[str | None] = mapped_column(String(140), nullable=True)
+    is_need: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     owner: Mapped["User"] = relationship(back_populates="expenses")

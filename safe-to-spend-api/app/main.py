@@ -9,7 +9,7 @@ import qrcode.image.svg
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import delete, inspect, select, text, update
+from sqlalchemy import delete, func, inspect, select, text, update
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -22,7 +22,7 @@ from app.core.security import (
     verify_password,
 )
 from app.database import Base, engine, get_db
-from app.models import Expense, Income, User, Wallet, WalletAdjustment
+from app.models import Expense, Income, PaydaySource, User, Wallet, WalletAdjustment
 from app.schemas import (
     ChangePasswordRequest,
     DashboardOut,
@@ -34,7 +34,9 @@ from app.schemas import (
     IncomeUpdate,
     LoginOut,
     MfaLoginRequest,
-    PaydayUpdate,
+    PaydaySourceCreate,
+    PaydaySourceOut,
+    PaydaySourceUpdate,
     Token,
     TwoFactorDisableRequest,
     TwoFactorSetupOut,
@@ -54,17 +56,13 @@ def _ensure_columns():
     """create_all only creates missing tables, not missing columns on existing ones."""
     expected = {
         "users": {
-            "next_payday": "DATE",
-            "payday_amount": "NUMERIC(12, 2)",
-            "payday_wallet_id": "INTEGER",
-            "payday_category": "VARCHAR(20)",
-            "payday_note": "VARCHAR(140)",
             "totp_secret": "VARCHAR(32)",
             "totp_enabled": "BOOLEAN DEFAULT 0",
         },
         "expenses": {
             "wallet_id": "INTEGER",
             "wallet_label": "VARCHAR(50)",
+            "is_need": "BOOLEAN DEFAULT 0",
         },
     }
     inspector = inspect(engine)
@@ -210,29 +208,79 @@ def me(current_user: User = Depends(get_current_user)):
 
 
 # ---------------------------------------------------------------------------
-# payday
+# payday sources
 # ---------------------------------------------------------------------------
-@app.put("/api/payday", response_model=UserOut)
-def set_payday(payload: PaydayUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@app.get("/api/payday-sources", response_model=list[PaydaySourceOut])
+def list_payday_sources(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    stmt = (
+        select(PaydaySource)
+        .where(PaydaySource.user_id == current_user.id)
+        .order_by(PaydaySource.next_date.asc())
+    )
+    return db.scalars(stmt).all()
+
+
+@app.post("/api/payday-sources", response_model=PaydaySourceOut, status_code=status.HTTP_201_CREATED)
+def create_payday_source(
+    payload: PaydaySourceCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    wallet = _get_owned_wallet(payload.wallet_id, current_user, db) if payload.wallet_id else None
+
+    source = PaydaySource(
+        user_id=current_user.id,
+        wallet_id=wallet.id if wallet else None,
+        wallet_label=wallet.label if wallet else None,
+        label=payload.label,
+        amount=payload.amount,
+        category=payload.category,
+        recurrence=payload.recurrence,
+        next_date=payload.next_date,
+        note=payload.note,
+    )
+    db.add(source)
+    db.commit()
+    db.refresh(source)
+    return source
+
+
+def _get_owned_payday_source(source_id: int, current_user: User, db: Session) -> PaydaySource:
+    source = db.get(PaydaySource, source_id)
+    if not source or source.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payday source not found")
+    return source
+
+
+@app.patch("/api/payday-sources/{source_id}", response_model=PaydaySourceOut)
+def update_payday_source(
+    source_id: int,
+    payload: PaydaySourceUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    source = _get_owned_payday_source(source_id, current_user, db)
     updates = payload.model_dump(exclude_unset=True)
 
-    if "wallet_id" in updates and updates["wallet_id"] is not None:
-        _get_owned_wallet(updates["wallet_id"], current_user, db)
-
-    if "next_payday" in updates:
-        current_user.next_payday = updates["next_payday"]
-    if "amount" in updates:
-        current_user.payday_amount = updates["amount"]
     if "wallet_id" in updates:
-        current_user.payday_wallet_id = updates["wallet_id"]
-    if "category" in updates:
-        current_user.payday_category = updates["category"]
-    if "note" in updates:
-        current_user.payday_note = updates["note"]
+        if updates["wallet_id"] is not None:
+            wallet = _get_owned_wallet(updates["wallet_id"], current_user, db)
+            updates["wallet_label"] = wallet.label
+        else:
+            updates["wallet_label"] = None
 
+    for field, value in updates.items():
+        setattr(source, field, value)
     db.commit()
-    db.refresh(current_user)
-    return current_user
+    db.refresh(source)
+    return source
+
+
+@app.delete("/api/payday-sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_payday_source(
+    source_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    source = _get_owned_payday_source(source_id, current_user, db)
+    db.delete(source)
+    db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -295,8 +343,11 @@ def delete_wallet(wallet_id: int, current_user: User = Depends(get_current_user)
     db.execute(delete(Expense).where(Expense.wallet_id == wallet.id))
     db.execute(delete(Income).where(Income.wallet_id == wallet.id))
     db.execute(delete(WalletAdjustment).where(WalletAdjustment.wallet_id == wallet.id))
-    if current_user.payday_wallet_id == wallet.id:
-        current_user.payday_wallet_id = None
+    db.execute(
+        update(PaydaySource)
+        .where(PaydaySource.wallet_id == wallet.id)
+        .values(wallet_id=None, wallet_label=None)
+    )
 
     db.delete(wallet)
     db.commit()
@@ -428,6 +479,7 @@ def create_expense(payload: ExpenseCreate, current_user: User = Depends(get_curr
         amount=payload.amount,
         category=payload.category,
         note=payload.note,
+        is_need=payload.is_need,
         created_at=created_at,
     )
     wallet.balance = Decimal(str(wallet.balance)) - Decimal(str(payload.amount))
@@ -497,16 +549,32 @@ def dashboard(current_user: User = Depends(get_current_user), db: Session = Depe
     recent_expenses = db.scalars(
         select(Expense).where(Expense.user_id == current_user.id).order_by(Expense.created_at.desc()).limit(20)
     ).all()
+    upcoming_paydays = db.scalars(
+        select(PaydaySource).where(PaydaySource.user_id == current_user.id).order_by(PaydaySource.next_date.asc())
+    ).all()
 
     total_balance = sum(float(w.balance) for w in wallets)
 
+    # Needs/bills expenses are carved out of the daily-spend pool entirely: the money still
+    # leaves the wallet, but adding it back here means it never competes with the discretionary
+    # allowance, today or on any future day.
+    needs_reserved = float(
+        db.scalar(
+            select(func.coalesce(func.sum(Expense.amount), 0)).where(
+                Expense.user_id == current_user.id, Expense.is_need.is_(True)
+            )
+        )
+    )
+    spendable_balance = total_balance + needs_reserved
+
     today = datetime.now(settings.tzinfo).date()
-    if current_user.next_payday and current_user.next_payday > today:
-        days_remaining = (current_user.next_payday - today).days
+    next_payday = next((p.next_date for p in upcoming_paydays if p.next_date > today), None)
+    if next_payday:
+        days_remaining = (next_payday - today).days
     else:
         days_remaining = 1
 
-    base_daily_allowance = max(total_balance, 0) / days_remaining
+    base_daily_allowance = max(spendable_balance, 0) / days_remaining
 
     def _local_date(dt: datetime) -> date:
         if dt.tzinfo is None:
@@ -514,7 +582,7 @@ def dashboard(current_user: User = Depends(get_current_user), db: Session = Depe
         return dt.astimezone(settings.tzinfo).date()
 
     spent_today = sum(
-        float(e.amount) for e in recent_expenses if _local_date(e.created_at) == today
+        float(e.amount) for e in recent_expenses if _local_date(e.created_at) == today and not e.is_need
     )
     safe_to_spend_today = base_daily_allowance - spent_today
 
@@ -522,10 +590,11 @@ def dashboard(current_user: User = Depends(get_current_user), db: Session = Depe
         safe_to_spend_today=round(safe_to_spend_today, 2),
         total_wallet_balance=round(total_balance, 2),
         days_remaining=days_remaining,
-        next_payday=current_user.next_payday,
+        next_payday=next_payday,
         spent_today=round(spent_today, 2),
         wallets=wallets,
         recent_expenses=recent_expenses,
+        upcoming_paydays=upcoming_paydays,
     )
 
 
