@@ -57,12 +57,12 @@ def _ensure_columns():
     expected = {
         "users": {
             "totp_secret": "VARCHAR(32)",
-            "totp_enabled": "BOOLEAN DEFAULT 0",
+            "totp_enabled": "BOOLEAN DEFAULT FALSE",
         },
         "expenses": {
             "wallet_id": "INTEGER",
             "wallet_label": "VARCHAR(50)",
-            "is_need": "BOOLEAN DEFAULT 0",
+            "is_need": "BOOLEAN DEFAULT FALSE",
         },
     }
     inspector = inspect(engine)
