@@ -10,6 +10,7 @@ const props = defineProps({
   selectedNames: { type: Array, default: () => [] },
   wallets: { type: Array, default: () => [] },
   saving: { type: Boolean, default: false },
+  addingForeignMoney: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close', 'save', 'remove-now', 'add-foreign-money'])
 
@@ -20,6 +21,7 @@ function foreignMoneyWallets(provider) {
 }
 
 function addForeignMoney(group, provider) {
+  if (props.addingForeignMoney) return
   const code = newForeignCurrency.value
   const label = `${provider.name} (${code})`
   if (props.wallets.some((w) => w.label === label)) return
@@ -261,10 +263,11 @@ function cancel() {
                     <CurrencySelect v-model="newForeignCurrency" compact class="min-w-0 flex-1" />
                     <button
                       type="button"
-                      class="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-xs font-bold text-accent-text"
+                      class="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-xs font-bold text-accent-text disabled:opacity-60"
+                      :disabled="addingForeignMoney"
                       @click="addForeignMoney(group, provider)"
                     >
-                      Add
+                      {{ addingForeignMoney ? 'Adding…' : 'Add' }}
                     </button>
                   </div>
                 </div>

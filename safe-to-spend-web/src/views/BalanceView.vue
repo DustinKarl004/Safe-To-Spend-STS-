@@ -41,6 +41,7 @@ const confirmingWalletRemove = ref(false)
 const removingWallet = ref(false)
 const savingWalletSelection = ref(false)
 const savingWalletBalance = ref(false)
+const addingForeignMoney = ref(false)
 
 async function removeWalletsNow(ids) {
   try {
@@ -77,10 +78,13 @@ function openWalletEdit(wallet) {
 }
 
 async function addForeignMoney({ kind, label, currency }) {
+  addingForeignMoney.value = true
   try {
     await dashboard.addWallet({ kind, label, balance: 0, currency })
   } catch {
     window.alert('Something went wrong adding that wallet. Please try again.')
+  } finally {
+    addingForeignMoney.value = false
   }
 }
 
@@ -351,6 +355,7 @@ async function confirmRemovePaydaySource() {
       :selected-names="dashboard.wallets.map((w) => w.label)"
       :wallets="dashboard.wallets"
       :saving="savingWalletSelection"
+      :adding-foreign-money="addingForeignMoney"
       @close="addWalletOpen = false"
       @save="saveWalletSelection"
       @remove-now="removeWalletsNow"
