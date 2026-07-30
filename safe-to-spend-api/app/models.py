@@ -39,6 +39,8 @@ class Wallet(Base):
     kind: Mapped[str] = mapped_column(String(20))  # ewallet | digital_bank | bank | cash
     label: Mapped[str] = mapped_column(String(50))
     balance: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
+    currency: Mapped[str] = mapped_column(String(3), default="PHP")  # ISO 4217, e.g. USD, EUR
+    interest_rate: Mapped[float | None] = mapped_column(Numeric(6, 3), nullable=True)  # annual % e.g. 2.5
 
     owner: Mapped["User"] = relationship(back_populates="wallets", foreign_keys=[user_id])
 
@@ -81,7 +83,7 @@ class PaydaySource(Base):
     label: Mapped[str | None] = mapped_column(String(50), nullable=True)
     amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     category: Mapped[str] = mapped_column(String(20))  # see INCOME_CATEGORY_PATTERN in schemas.py
-    recurrence: Mapped[str] = mapped_column(String(20), default="one_time")  # one_time|weekly|biweekly|monthly|semi_monthly
+    recurrence: Mapped[str] = mapped_column(String(20), default="one_time")  # one_time|daily|weekly|biweekly|monthly|semi_monthly
     next_date: Mapped[date] = mapped_column(Date)
     note: Mapped[str | None] = mapped_column(String(140), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

@@ -3,6 +3,7 @@ import { reactive, ref, watch } from 'vue'
 import { WALLET_GROUPS } from '@/lib/walletProviders'
 import ProviderIcon from './ProviderIcon.vue'
 import ConfirmModal from './ConfirmModal.vue'
+import CurrencySelect from './CurrencySelect.vue'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -10,11 +11,33 @@ const props = defineProps({
   wallets: { type: Array, default: () => [] },
   saving: { type: Boolean, default: false },
 })
-const emit = defineEmits(['close', 'save', 'remove-now'])
+const emit = defineEmits(['close', 'save', 'remove-now', 'add-foreign-money'])
+
+const newForeignCurrency = ref('USD')
+
+function foreignMoneyWallets(provider) {
+  return props.wallets.filter((w) => w.label.startsWith(`${provider.name} (`))
+}
+
+function addForeignMoney(group, provider) {
+  const code = newForeignCurrency.value
+  const label = `${provider.name} (${code})`
+  if (props.wallets.some((w) => w.label === label)) return
+  emit('add-foreign-money', { kind: group.kind, label, currency: code })
+}
+
+function removeForeignMoney(wallet) {
+  if (Number(wallet.balance_php ?? wallet.balance) !== 0) {
+    removalTarget.value = wallet.label
+    return
+  }
+  emit('remove-now', [wallet.id])
+}
 
 const pending = reactive(new Set())
 const removalTarget = ref(null)
 const removalGroup = ref(null)
+const expandedParents = reactive(new Set())
 
 watch(
   () => props.open,
@@ -24,16 +47,42 @@ watch(
       props.selectedNames.forEach((name) => pending.add(name))
       removalTarget.value = null
       removalGroup.value = null
+      expandedParents.clear()
+      WALLET_GROUPS.forEach((group) =>
+        group.providers.forEach((p) => {
+          if (p.children?.some((c) => pending.has(c.name))) expandedParents.add(p.name)
+        }),
+      )
     }
   },
 )
+
+function leafProviders(group) {
+  return group.providers.flatMap((p) => {
+    if (p.perCurrency) return []
+    return p.children ? p.children : [p]
+  })
+}
 
 function isSelected(name) {
   return pending.has(name)
 }
 
+function isExpanded(name) {
+  return expandedParents.has(name)
+}
+
+function toggleExpanded(name) {
+  if (expandedParents.has(name)) expandedParents.delete(name)
+  else expandedParents.add(name)
+}
+
+function selectedChildCount(provider) {
+  return provider.children.filter((c) => isSelected(c.name)).length
+}
+
 function hasSelection(group) {
-  return group.providers.some((p) => isSelected(p.name))
+  return leafProviders(group).some((p) => isSelected(p.name))
 }
 
 function existingWallet(name) {
@@ -41,7 +90,9 @@ function existingWallet(name) {
 }
 
 function walletBalance(name) {
-  return existingWallet(name)?.balance ? Number(existingWallet(name).balance) : 0
+  const wallet = existingWallet(name)
+  if (!wallet) return 0
+  return Number(wallet.balance_php ?? wallet.balance) || 0
 }
 
 function formatPeso(value) {
@@ -75,19 +126,19 @@ function cancelRemoval() {
 }
 
 function clearGroup(group) {
-  const withBalance = group.providers.find((p) => pending.has(p.name) && walletBalance(p.name) !== 0)
+  const withBalance = leafProviders(group).find((p) => pending.has(p.name) && walletBalance(p.name) !== 0)
   if (withBalance) {
     removalGroup.value = group
     return
   }
-  group.providers.forEach((p) => pending.delete(p.name))
+  leafProviders(group).forEach((p) => pending.delete(p.name))
 }
 
 function confirmGroupRemoval() {
   const group = removalGroup.value
   if (group) {
     const ids = []
-    group.providers.forEach((p) => {
+    leafProviders(group).forEach((p) => {
       if (pending.has(p.name)) {
         pending.delete(p.name)
         const wallet = existingWallet(p.name)
@@ -115,7 +166,9 @@ function finish() {
     return
   }
   const selected = WALLET_GROUPS.flatMap((group) =>
-    group.providers.filter((p) => pending.has(p.name)).map((p) => ({ kind: group.kind, name: p.name })),
+    leafProviders(group)
+      .filter((p) => pending.has(p.name))
+      .map((p) => ({ kind: group.kind, name: p.name })),
   )
   emit('save', selected)
 }
@@ -175,25 +228,112 @@ function cancel() {
             </button>
           </div>
           <div class="grid grid-cols-2 gap-2.5">
-            <button
-              v-for="provider in group.providers"
-              :key="provider.name"
-              type="button"
-              class="relative flex flex-col items-center gap-2 rounded-xl border p-3.5 text-center text-sm font-semibold transition"
-              :class="
-                isSelected(provider.name)
-                  ? 'border-accent bg-accent/10 text-text'
-                  : 'border-border bg-bg-sunken text-text hover:border-accent/50'
-              "
-              @click="toggle(provider.name)"
-            >
-              <span v-if="isSelected(provider.name)" class="absolute right-2 top-2 text-accent">✓</span>
-              <ProviderIcon v-bind="provider" :size="64" />
-              <span class="leading-tight">{{ provider.name }}</span>
-              <span v-if="existingWallet(provider.name)" class="text-xs font-semibold text-text-dim">
-                {{ formatPeso(existingWallet(provider.name).balance) }}
-              </span>
-            </button>
+            <template v-for="provider in group.providers" :key="provider.name">
+              <div v-if="provider.perCurrency" class="col-span-2 flex flex-col gap-2.5">
+                <div
+                  v-for="wallet in foreignMoneyWallets(provider)"
+                  :key="wallet.id"
+                  class="flex items-center gap-3 rounded-xl border border-border bg-bg-sunken p-3"
+                >
+                  <ProviderIcon v-bind="provider" :name="wallet.label" :size="44" />
+                  <div class="min-w-0 flex-1">
+                    <p class="truncate text-sm font-semibold">{{ wallet.label }}</p>
+                    <p class="text-xs text-text-dim">{{ formatPeso(walletBalance(wallet.label)) }}</p>
+                  </div>
+                  <button
+                    type="button"
+                    class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-text-dim transition hover:bg-danger/10 hover:text-danger"
+                    aria-label="Remove"
+                    @click="removeForeignMoney(wallet)"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                      <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                    </svg>
+                  </button>
+                </div>
+
+                <div class="flex flex-col gap-2 rounded-xl border border-dashed border-border p-2.5">
+                  <div class="flex items-center gap-2">
+                    <ProviderIcon v-bind="provider" :size="32" />
+                    <span class="min-w-0 flex-1 truncate text-sm font-semibold">{{ provider.name }}</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <CurrencySelect v-model="newForeignCurrency" compact class="min-w-0 flex-1" />
+                    <button
+                      type="button"
+                      class="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-xs font-bold text-accent-text"
+                      @click="addForeignMoney(group, provider)"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                v-else-if="!provider.children"
+                type="button"
+                class="relative flex flex-col items-center gap-2 rounded-xl border p-3.5 text-center text-sm font-semibold transition"
+                :class="
+                  isSelected(provider.name)
+                    ? 'border-accent bg-accent/10 text-text'
+                    : 'border-border bg-bg-sunken text-text hover:border-accent/50'
+                "
+                @click="toggle(provider.name)"
+              >
+                <span v-if="isSelected(provider.name)" class="absolute right-2 top-2 text-accent">✓</span>
+                <ProviderIcon v-bind="provider" :size="64" />
+                <span class="leading-tight">{{ provider.name }}</span>
+                <span v-if="existingWallet(provider.name)" class="text-xs font-semibold text-text-dim">
+                  {{ formatPeso(walletBalance(provider.name)) }}
+                </span>
+              </button>
+
+              <template v-else>
+                <button
+                  type="button"
+                  class="relative flex flex-col items-center gap-2 rounded-xl border p-3.5 text-center text-sm font-semibold transition"
+                  :class="
+                    selectedChildCount(provider) > 0
+                      ? 'border-accent bg-accent/10 text-text'
+                      : 'border-border bg-bg-sunken text-text hover:border-accent/50'
+                  "
+                  @click="toggleExpanded(provider.name)"
+                >
+                  <span
+                    v-if="selectedChildCount(provider) > 0"
+                    class="absolute right-2 top-2 rounded-full bg-accent px-1.5 text-[10px] font-bold text-accent-text"
+                  >
+                    {{ selectedChildCount(provider) }}
+                  </span>
+                  <ProviderIcon v-bind="provider" :size="64" />
+                  <span class="leading-tight">{{ provider.name }}</span>
+                  <span class="text-xs font-semibold text-text-dim">{{ isExpanded(provider.name) ? 'Hide' : 'Show all' }} ▾</span>
+                </button>
+
+                <template v-if="isExpanded(provider.name)">
+                  <button
+                    v-for="child in provider.children"
+                    :key="child.name"
+                    type="button"
+                    class="relative flex flex-col items-center gap-2 rounded-xl border p-3.5 text-center text-sm font-semibold transition"
+                    :class="
+                      isSelected(child.name)
+                        ? 'border-accent bg-accent/10 text-text'
+                        : 'border-border bg-bg-sunken text-text hover:border-accent/50'
+                    "
+                    @click="toggle(child.name)"
+                  >
+                    <span v-if="isSelected(child.name)" class="absolute right-2 top-2 text-accent">✓</span>
+                    <ProviderIcon v-bind="child" :size="64" />
+                    <span class="leading-tight">{{ child.name }}</span>
+                    <span v-if="existingWallet(child.name)" class="text-xs font-semibold text-text-dim">
+                      {{ formatPeso(walletBalance(child.name)) }}
+                    </span>
+                  </button>
+                </template>
+              </template>
+            </template>
           </div>
         </div>
       </div>

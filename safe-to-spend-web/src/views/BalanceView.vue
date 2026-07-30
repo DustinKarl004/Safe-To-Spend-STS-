@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useDashboardStore } from '@/stores/dashboard'
-import { KIND_LABEL, providerIcon } from '@/lib/walletProviders'
+import { KIND_LABEL, providerIcon, isPerCurrencyLabel } from '@/lib/walletProviders'
 import { incomeCategory } from '@/lib/incomeCategories'
 import ProviderIcon from '@/components/ProviderIcon.vue'
 import CategoryIcon from '@/components/CategoryIcon.vue'
@@ -26,6 +26,10 @@ onMounted(() => {
 function money(n) {
   return Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
+
+const sortedWallets = computed(() =>
+  [...dashboard.wallets].sort((a, b) => Number(b.balance_php) - Number(a.balance_php))
+)
 
 function pad(n) {
   return String(n).padStart(2, '0')
@@ -51,7 +55,7 @@ async function removeWalletsNow(ids) {
 async function saveWalletSelection(selected) {
   const selectedNames = new Set(selected.map((s) => s.name))
   const toAdd = selected.filter((s) => !dashboard.wallets.some((w) => w.label === s.name))
-  const toRemove = dashboard.wallets.filter((w) => !selectedNames.has(w.label))
+  const toRemove = dashboard.wallets.filter((w) => !selectedNames.has(w.label) && !isPerCurrencyLabel(w.label))
 
   savingWalletSelection.value = true
   try {
@@ -72,10 +76,18 @@ function openWalletEdit(wallet) {
   editingWallet.value = wallet
 }
 
-async function saveWalletEdit(id, balance) {
+async function addForeignMoney({ kind, label, currency }) {
+  try {
+    await dashboard.addWallet({ kind, label, balance: 0, currency })
+  } catch {
+    window.alert('Something went wrong adding that wallet. Please try again.')
+  }
+}
+
+async function saveWalletEdit(id, balance, interestRate, currency) {
   savingWalletBalance.value = true
   try {
-    await dashboard.updateWallet(id, { balance })
+    await dashboard.updateWallet(id, { balance, interest_rate: interestRate, currency })
     editingWallet.value = null
   } catch {
     window.alert('Something went wrong saving that wallet. Please try again.')
@@ -313,7 +325,7 @@ async function confirmRemovePaydaySource() {
 
       <p v-if="!dashboard.wallets.length" class="mt-4 text-sm text-text-dim">No wallets yet — add one to get started.</p>
       <ul v-else class="mt-4 flex flex-col gap-2.5">
-        <li v-for="wallet in dashboard.wallets" :key="wallet.id">
+        <li v-for="wallet in sortedWallets" :key="wallet.id">
           <button
             type="button"
             class="flex w-full items-center gap-3 rounded-xl bg-bg-sunken px-3.5 py-3 text-left transition hover:brightness-110"
@@ -324,7 +336,11 @@ async function confirmRemovePaydaySource() {
               <p class="truncate text-sm font-semibold">{{ wallet.label }}</p>
               <p class="text-xs text-text-dim">{{ KIND_LABEL[wallet.kind] }}</p>
             </div>
-            <span class="shrink-0 text-sm font-bold tabular-nums">₱{{ money(wallet.balance) }}</span>
+            <span v-if="wallet.currency !== 'PHP'" class="shrink-0 text-right">
+              <span class="block text-sm font-bold tabular-nums">{{ wallet.currency }} {{ money(wallet.balance) }}</span>
+              <span class="block text-xs font-semibold tabular-nums text-text-dim">≈ ₱{{ money(wallet.balance_php) }}</span>
+            </span>
+            <span v-else class="shrink-0 text-sm font-bold tabular-nums">₱{{ money(wallet.balance) }}</span>
           </button>
         </li>
       </ul>
@@ -338,6 +354,7 @@ async function confirmRemovePaydaySource() {
       @close="addWalletOpen = false"
       @save="saveWalletSelection"
       @remove-now="removeWalletsNow"
+      @add-foreign-money="addForeignMoney"
     />
 
     <WalletEditSheet

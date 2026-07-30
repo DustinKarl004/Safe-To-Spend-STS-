@@ -28,7 +28,19 @@ export const WALLET_GROUPS = [
     label: 'E-Wallets',
     providers: [
       { name: 'GCash', initials: 'GC', color: '#0072CE', logo: gcash },
-      { name: 'Maya', initials: 'M', color: '#00B87C', logo: maya },
+      {
+        name: 'Maya',
+        initials: 'M',
+        color: '#00B87C',
+        logo: maya,
+        children: [
+          { name: 'Maya Savings', initials: 'MS', color: '#00B87C', logo: maya },
+          { name: 'Maya Wallet', initials: 'MW', color: '#00B87C', logo: maya },
+          { name: 'Maya Funds', initials: 'MF', color: '#00B87C', logo: maya },
+          { name: 'Maya Crypto', initials: 'MC', color: '#00B87C', logo: maya },
+          { name: 'Maya Stocks', initials: 'MK', color: '#00B87C', logo: maya },
+        ],
+      },
       { name: 'ShopeePay', initials: 'SP', color: '#EE4D2D', logo: shopeepay },
       { name: 'GrabPay', initials: 'GP', color: '#00B14F', logo: grabpay },
       { name: 'Coins.ph', initials: 'C', color: '#1BA0E2', logo: coinsph },
@@ -66,6 +78,7 @@ export const WALLET_GROUPS = [
       { name: 'Wallet', initials: 'W', color: '#00A19A', icon: 'wallet' },
       { name: 'Piggy Bank', initials: 'PB', color: '#E0559C', icon: 'piggy_bank' },
       { name: 'Petty Cash', initials: 'PC', color: '#8A5A3B', icon: 'petty_cash' },
+      { name: 'Foreign Money', initials: 'FM', color: '#3E7CB1', icon: 'foreign_money', perCurrency: true },
     ],
   },
 ]
@@ -78,9 +91,21 @@ export const KIND_LABEL = {
 }
 
 const PROVIDER_BY_NAME = new Map(
-  WALLET_GROUPS.flatMap((group) => group.providers.map((p) => [p.name, p])),
+  WALLET_GROUPS.flatMap((group) =>
+    group.providers.flatMap((p) => (p.children ? p.children : [p])).map((p) => [p.name, p]),
+  ),
 )
 
+const PER_CURRENCY_PROVIDERS = WALLET_GROUPS.flatMap((group) => group.providers).filter((p) => p.perCurrency)
+
 export function providerIcon(name) {
-  return PROVIDER_BY_NAME.get(name) || { name, initials: name?.[0]?.toUpperCase() || '?', color: '#5A6178' }
+  const exact = PROVIDER_BY_NAME.get(name)
+  if (exact) return exact
+  const base = PER_CURRENCY_PROVIDERS.find((p) => name?.startsWith(`${p.name} (`))
+  if (base) return { ...base, name }
+  return { name, initials: name?.[0]?.toUpperCase() || '?', color: '#5A6178' }
+}
+
+export function isPerCurrencyLabel(label) {
+  return PER_CURRENCY_PROVIDERS.some((p) => label?.startsWith(`${p.name} (`))
 }

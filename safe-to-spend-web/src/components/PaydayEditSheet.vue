@@ -8,11 +8,24 @@ import DatePicker from './DatePicker.vue'
 
 const RECURRENCE_OPTIONS = [
   { value: 'one_time', label: 'One-time' },
+  { value: 'daily', label: 'Daily' },
   { value: 'weekly', label: 'Weekly' },
   { value: 'biweekly', label: 'Biweekly' },
   { value: 'semi_monthly', label: 'Semi-monthly' },
   { value: 'monthly', label: 'Monthly' },
 ]
+
+// Digital banks (Maya, MariBank, etc.) accrue interest daily off the end-of-day
+// balance: daily interest = balance x (annual rate / 365). We approximate the
+// number of days covered by each payout using calendar-day period lengths.
+const DAYS_PER_PERIOD = {
+  one_time: 1,
+  daily: 1,
+  weekly: 7,
+  biweekly: 14,
+  semi_monthly: 15,
+  monthly: 30,
+}
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -49,6 +62,20 @@ watch(
 )
 
 const canSave = computed(() => Boolean(date.value))
+
+// BIR final withholding tax on Philippine bank/e-wallet interest income.
+const WITHHOLDING_TAX_RATE = 0.2
+
+function maybeAutofillInterest() {
+  if (category.value !== 'interest') return
+  const wallet = props.wallets.find((w) => w.id === walletId.value)
+  if (!wallet?.interest_rate) return
+  const days = DAYS_PER_PERIOD[recurrence.value] ?? 1
+  const dailyRate = Number(wallet.interest_rate) / 100 / 365
+  const grossInterest = Number(wallet.balance_php ?? wallet.balance) * dailyRate * days
+  const netInterest = grossInterest * (1 - WITHHOLDING_TAX_RATE)
+  amountStr.value = netInterest.toFixed(2)
+}
 
 function handleSave() {
   if (!canSave.value || props.saving) return
@@ -112,7 +139,7 @@ function handleRemove() {
             type="button"
             class="flex flex-col items-center gap-1.5 rounded-xl border p-2 text-center transition"
             :class="category === cat.value ? 'border-accent bg-accent/10' : 'border-border bg-bg-sunken hover:border-accent/50'"
-            @click="category = cat.value"
+            @click="category = cat.value; maybeAutofillInterest()"
           >
             <CategoryIcon :icon="cat.icon" :color="cat.color" :size="34" />
             <span class="text-[11px] font-semibold leading-tight">{{ cat.label }}</span>
@@ -127,7 +154,7 @@ function handleRemove() {
             type="button"
             class="rounded-full border px-3.5 py-2 text-xs font-semibold transition"
             :class="recurrence === opt.value ? 'border-accent bg-accent/10 text-accent' : 'border-border bg-bg-sunken hover:border-accent/50'"
-            @click="recurrence = opt.value"
+            @click="recurrence = opt.value; maybeAutofillInterest()"
           >
             {{ opt.label }}
           </button>
@@ -141,7 +168,7 @@ function handleRemove() {
             type="button"
             class="flex items-center gap-3 rounded-xl border p-2.5 text-left transition"
             :class="walletId === wallet.id ? 'border-accent bg-accent/10' : 'border-border bg-bg-sunken hover:border-accent/50'"
-            @click="walletId = wallet.id"
+            @click="walletId = wallet.id; maybeAutofillInterest()"
           >
             <ProviderIcon v-bind="providerIcon(wallet.label)" :size="34" />
             <span class="min-w-0 flex-1 truncate text-sm font-semibold">{{ wallet.label }}</span>

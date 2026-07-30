@@ -3,7 +3,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 INCOME_CATEGORY_PATTERN = "^(salary|interest|investment|cashback|allowance|bonus|other)$"
-RECURRENCE_PATTERN = "^(one_time|weekly|biweekly|monthly|semi_monthly)$"
+RECURRENCE_PATTERN = "^(one_time|daily|weekly|biweekly|monthly|semi_monthly)$"
 
 
 # ---- auth ----
@@ -99,11 +99,15 @@ class WalletCreate(BaseModel):
     kind: str = Field(pattern="^(ewallet|digital_bank|bank|cash)$")
     label: str = Field(max_length=50)
     balance: float = Field(ge=0)
+    currency: str = Field(default="PHP", min_length=3, max_length=3)
+    interest_rate: float | None = Field(default=None, ge=0, le=100)
 
 
 class WalletUpdate(BaseModel):
     label: str | None = Field(default=None, max_length=50)
     balance: float | None = Field(default=None, ge=0)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    interest_rate: float | None = Field(default=None, ge=0, le=100)
 
 
 class WalletOut(BaseModel):
@@ -112,6 +116,9 @@ class WalletOut(BaseModel):
     kind: str
     label: str
     balance: float
+    currency: str
+    balance_php: float
+    interest_rate: float | None
 
 
 class WalletAdjustmentOut(BaseModel):

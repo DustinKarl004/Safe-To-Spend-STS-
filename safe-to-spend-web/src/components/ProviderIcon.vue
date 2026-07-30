@@ -18,6 +18,8 @@ const PATHS = {
   piggy_bank:
     'M4 12.5c0-3.6 3.4-6.5 8-6.5 3.6 0 6.6 1.8 7.7 4.3H21a1 1 0 0 1 1 1v2.4a1 1 0 0 1-1 1h-1.3c-.5 1-1.4 1.9-2.7 2.5V19h-2.5v-1.1a10 10 0 0 1-1.5.1c-.7 0-1.4-.05-2-.15V19H8.5v-1.6C5.8 16.2 4 14.5 4 12.5Z M9 8.5V6M15 8.5V6M7.5 12h.01',
   petty_cash: 'M4 6h16v12H4V6Z M4 10h16 M8 14h3',
+  foreign_money:
+    'M12 21a9 9 0 100-18 9 9 0 000 18Z M3 12h18 M12 3c2.5 3 2.5 15 0 18 M12 3c-2.5 3-2.5 15 0 18',
 }
 
 const path = computed(() => (props.icon ? PATHS[props.icon] : null))

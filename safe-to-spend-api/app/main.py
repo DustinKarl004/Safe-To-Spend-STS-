@@ -1,6 +1,10 @@
 import base64
+import calendar
 import io
-from datetime import date, datetime, timezone
+import json
+import urllib.error
+import urllib.request
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pyotp
@@ -63,6 +67,10 @@ def _ensure_columns():
             "wallet_id": "INTEGER",
             "wallet_label": "VARCHAR(50)",
             "is_need": "BOOLEAN DEFAULT FALSE",
+        },
+        "wallets": {
+            "interest_rate": "NUMERIC(6,3)",
+            "currency": "VARCHAR(3) DEFAULT 'PHP'",
         },
     }
     inspector = inspect(engine)
@@ -210,8 +218,45 @@ def me(current_user: User = Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 # payday sources
 # ---------------------------------------------------------------------------
+def _add_one_month(d: date) -> date:
+    month = d.month + 1
+    year = d.year + (month - 1) // 12
+    month = (month - 1) % 12 + 1
+    last_day = calendar.monthrange(year, month)[1]
+    return date(year, month, min(d.day, last_day))
+
+
+_RECURRENCE_STEP = {
+    "daily": lambda d: d + timedelta(days=1),
+    "weekly": lambda d: d + timedelta(weeks=1),
+    "biweekly": lambda d: d + timedelta(weeks=2),
+    "semi_monthly": lambda d: d + timedelta(days=15),
+    "monthly": _add_one_month,
+}
+
+
+def _advance_recurring_paydays(user_id: int, db: Session) -> None:
+    """Roll a recurring payday source's next_date forward to the next occurrence
+    on or after today, so past-due entries don't linger stuck in the past."""
+    today = datetime.now(settings.tzinfo).date()
+    sources = db.scalars(
+        select(PaydaySource).where(PaydaySource.user_id == user_id, PaydaySource.recurrence != "one_time")
+    ).all()
+    changed = False
+    for source in sources:
+        step = _RECURRENCE_STEP.get(source.recurrence)
+        if not step:
+            continue
+        while source.next_date < today:
+            source.next_date = step(source.next_date)
+            changed = True
+    if changed:
+        db.commit()
+
+
 @app.get("/api/payday-sources", response_model=list[PaydaySourceOut])
 def list_payday_sources(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    _advance_recurring_paydays(current_user.id, db)
     stmt = (
         select(PaydaySource)
         .where(PaydaySource.user_id == current_user.id)
@@ -286,9 +331,44 @@ def delete_payday_source(
 # ---------------------------------------------------------------------------
 # wallets
 # ---------------------------------------------------------------------------
+_FX_CACHE: dict[str, tuple[float, datetime]] = {}
+_FX_CACHE_TTL = timedelta(hours=6)
+
+
+def _get_php_rate(currency: str) -> float:
+    """PHP received per 1 unit of `currency`, via the free Frankfurter (ECB) API.
+    Cached for a few hours; falls back to the last known rate (or 1.0) on failure
+    so a flaky network call never breaks the dashboard."""
+    if currency == "PHP":
+        return 1.0
+    cached = _FX_CACHE.get(currency)
+    now = datetime.now(timezone.utc)
+    if cached and now - cached[1] < _FX_CACHE_TTL:
+        return cached[0]
+    try:
+        url = f"https://api.frankfurter.dev/v1/latest?amount=1&from={currency}&to=PHP"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Safe-To-Spend)"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.load(resp)
+        rate = float(data["rates"]["PHP"])
+    except (urllib.error.URLError, KeyError, ValueError, TimeoutError):
+        if cached:
+            return cached[0]
+        rate = 1.0
+    _FX_CACHE[currency] = (rate, now)
+    return rate
+
+
+def _annotate_php(wallets: list[Wallet]) -> list[Wallet]:
+    for wallet in wallets:
+        wallet.balance_php = round(float(wallet.balance) * _get_php_rate(wallet.currency), 2)
+    return wallets
+
+
 @app.get("/api/wallets", response_model=list[WalletOut])
 def list_wallets(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return db.scalars(select(Wallet).where(Wallet.user_id == current_user.id)).all()
+    wallets = db.scalars(select(Wallet).where(Wallet.user_id == current_user.id)).all()
+    return _annotate_php(wallets)
 
 
 @app.post("/api/wallets", response_model=WalletOut, status_code=status.HTTP_201_CREATED)
@@ -297,6 +377,7 @@ def create_wallet(payload: WalletCreate, current_user: User = Depends(get_curren
     db.add(wallet)
     db.commit()
     db.refresh(wallet)
+    _annotate_php([wallet])
     return wallet
 
 
@@ -333,6 +414,7 @@ def update_wallet(
         setattr(wallet, field, value)
     db.commit()
     db.refresh(wallet)
+    _annotate_php([wallet])
     return wallet
 
 
@@ -545,7 +627,9 @@ def delete_expense(expense_id: int, current_user: User = Depends(get_current_use
 # ---------------------------------------------------------------------------
 @app.get("/api/dashboard", response_model=DashboardOut)
 def dashboard(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    _advance_recurring_paydays(current_user.id, db)
     wallets = db.scalars(select(Wallet).where(Wallet.user_id == current_user.id)).all()
+    _annotate_php(wallets)
     recent_expenses = db.scalars(
         select(Expense).where(Expense.user_id == current_user.id).order_by(Expense.created_at.desc()).limit(20)
     ).all()
@@ -553,7 +637,7 @@ def dashboard(current_user: User = Depends(get_current_user), db: Session = Depe
         select(PaydaySource).where(PaydaySource.user_id == current_user.id).order_by(PaydaySource.next_date.asc())
     ).all()
 
-    total_balance = sum(float(w.balance) for w in wallets)
+    total_balance = sum(w.balance_php for w in wallets)
 
     # Needs/bills expenses are carved out of the daily-spend pool entirely: the money still
     # leaves the wallet, but adding it back here means it never competes with the discretionary
