@@ -18,12 +18,15 @@ function toggle() {
     return
   }
   const rect = triggerRef.value.getBoundingClientRect()
+  const viewportW = window.innerWidth
   const viewportH = window.innerHeight
+  const panelWidth = Math.max(rect.width, 180)
   const panelHeight = 240
   const openUp = rect.bottom + panelHeight > viewportH && rect.top > panelHeight
+  const left = Math.min(Math.max(rect.left, 8), viewportW - panelWidth - 8)
   panelStyle.value = openUp
-    ? { left: `${rect.left}px`, bottom: `${viewportH - rect.top + 4}px`, width: `${Math.max(rect.width, 180)}px` }
-    : { left: `${rect.left}px`, top: `${rect.bottom + 4}px`, width: `${Math.max(rect.width, 180)}px` }
+    ? { left: `${left}px`, bottom: `${viewportH - rect.top + 4}px`, width: `${panelWidth}px` }
+    : { left: `${left}px`, top: `${rect.bottom + 4}px`, width: `${panelWidth}px` }
   open.value = true
 }
 
