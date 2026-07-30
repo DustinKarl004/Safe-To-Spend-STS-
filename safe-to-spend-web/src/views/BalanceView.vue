@@ -18,7 +18,6 @@ const dashboard = useDashboardStore()
 onMounted(() => {
   dashboard.refresh()
   dashboard.fetchAllExpenses()
-  dashboard.fetchWalletAdjustments()
   dashboard.fetchIncomes()
   dashboard.fetchPaydaySources()
 })
@@ -42,6 +41,51 @@ const removingWallet = ref(false)
 const savingWalletSelection = ref(false)
 const savingWalletBalance = ref(false)
 const addingForeignMoney = ref(false)
+const selectMode = ref(false)
+const selectedWalletIds = ref(new Set())
+const confirmingBulkRemove = ref(false)
+const removingBulk = ref(false)
+
+function toggleSelectMode() {
+  selectMode.value = !selectMode.value
+  selectedWalletIds.value = new Set()
+}
+
+function toggleWalletSelected(id) {
+  const next = new Set(selectedWalletIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selectedWalletIds.value = next
+}
+
+function handleWalletClick(wallet) {
+  if (selectMode.value) {
+    toggleWalletSelected(wallet.id)
+  } else {
+    openWalletEdit(wallet)
+  }
+}
+
+function askBulkRemove() {
+  if (!selectedWalletIds.value.size) return
+  confirmingBulkRemove.value = true
+}
+
+function cancelBulkRemove() {
+  confirmingBulkRemove.value = false
+}
+
+async function confirmBulkRemove() {
+  removingBulk.value = true
+  try {
+    await removeWalletsNow([...selectedWalletIds.value])
+    confirmingBulkRemove.value = false
+    selectMode.value = false
+    selectedWalletIds.value = new Set()
+  } finally {
+    removingBulk.value = false
+  }
+}
 
 async function removeWalletsNow(ids) {
   try {
@@ -135,12 +179,9 @@ const netThisMonth = computed(() => {
   }
 
   const incomeTotal = dashboard.incomes.filter((i) => inView(i.created_at)).reduce((sum, i) => sum + Number(i.amount), 0)
-  const adjustments = dashboard.walletAdjustments
-    .filter((a) => inView(a.created_at))
-    .reduce((sum, a) => sum + Number(a.delta), 0)
   const spent = dashboard.allExpenses.filter((e) => inView(e.created_at)).reduce((sum, e) => sum + Number(e.amount), 0)
 
-  return incomeTotal + adjustments - spent
+  return incomeTotal - spent
 })
 
 const monthLabel = computed(() =>
@@ -314,17 +355,27 @@ async function confirmRemovePaydaySource() {
     <div class="rounded-2xl border border-border bg-bg-raised p-6 shadow-sm">
       <div class="flex items-center justify-between">
         <h2 class="font-display text-base font-bold">Wallets</h2>
-        <button
-          type="button"
-          class="flex h-8 w-8 items-center justify-center rounded-full bg-bg-sunken text-text-dim transition hover:text-text"
-          aria-label="Add a wallet or bank"
-          title="Add a wallet or bank"
-          @click="addWalletOpen = true"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-            <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-          </svg>
-        </button>
+        <div class="flex items-center gap-3">
+          <button
+            v-if="dashboard.wallets.length"
+            type="button"
+            class="text-sm font-semibold text-accent"
+            @click="toggleSelectMode"
+          >
+            {{ selectMode ? 'Cancel' : 'Select' }}
+          </button>
+          <button
+            type="button"
+            class="flex h-8 w-8 items-center justify-center rounded-full bg-bg-sunken text-text-dim transition hover:text-text"
+            aria-label="Add a wallet or bank"
+            title="Add a wallet or bank"
+            @click="addWalletOpen = true"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       <p v-if="!dashboard.wallets.length" class="mt-4 text-sm text-text-dim">No wallets yet — add one to get started.</p>
@@ -333,8 +384,15 @@ async function confirmRemovePaydaySource() {
           <button
             type="button"
             class="flex w-full items-center gap-3 rounded-xl bg-bg-sunken px-3.5 py-3 text-left transition hover:brightness-110"
-            @click="openWalletEdit(wallet)"
+            @click="handleWalletClick(wallet)"
           >
+            <span
+              v-if="selectMode"
+              class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 text-[11px] font-bold transition"
+              :class="selectedWalletIds.has(wallet.id) ? 'border-accent bg-accent text-accent-text' : 'border-border text-transparent'"
+            >
+              ✓
+            </span>
             <ProviderIcon v-bind="providerIcon(wallet.label)" :size="40" />
             <div class="min-w-0 flex-1">
               <p class="truncate text-sm font-semibold">{{ wallet.label }}</p>
@@ -348,6 +406,23 @@ async function confirmRemovePaydaySource() {
           </button>
         </li>
       </ul>
+
+      <div v-if="dashboard.wallets.length" class="mt-4 flex items-center justify-between border-t border-border pt-3">
+        <span class="text-sm font-semibold text-text-dim">Total</span>
+        <span class="text-sm font-bold tabular-nums">₱{{ money(dashboard.totalWalletBalance) }}</span>
+      </div>
+
+      <div v-if="selectMode" class="mt-3 flex items-center justify-between rounded-xl bg-bg-sunken px-3.5 py-2.5">
+        <span class="text-sm font-semibold text-text-dim">{{ selectedWalletIds.size }} selected</span>
+        <button
+          type="button"
+          class="rounded-lg bg-danger px-3 py-1.5 text-xs font-bold text-white disabled:opacity-40"
+          :disabled="!selectedWalletIds.size"
+          @click="askBulkRemove"
+        >
+          Delete
+        </button>
+      </div>
     </div>
 
     <WalletPickerDrawer
@@ -378,6 +453,15 @@ async function confirmRemovePaydaySource() {
       :busy="removingWallet"
       @cancel="cancelRemoveWallet"
       @confirm="confirmRemoveWallet"
+    />
+
+    <ConfirmModal
+      :open="confirmingBulkRemove"
+      title="Remove these wallets?"
+      :message="`This will permanently delete ${selectedWalletIds.size} wallet${selectedWalletIds.size === 1 ? '' : 's'}, their balances, and all their income and expense entries. This cannot be undone.`"
+      :busy="removingBulk"
+      @cancel="cancelBulkRemove"
+      @confirm="confirmBulkRemove"
     />
 
     <PaydayEditSheet
